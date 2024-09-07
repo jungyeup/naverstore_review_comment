@@ -48,8 +48,26 @@ class NaverSmartStoreBot:
             '/html/body/div/div/div[1]/div/div/div[4]/div[1]/div/ul[1]/li[2]/input',
             '/html/body/div/div/div[1]/div/div/div[4]/div[1]/div/div/button'
         )
-        time.sleep(10)
+        time.sleep(3)
 
+        # Perform initial store selection
+        try:
+            store_select_button = self.driver.find_element(By.XPATH, '//a[@role="button" and @ui-sref="work.channel-select" and @data-action-location-id="selectStore"]')
+            store_select_button.click()
+            time.sleep(1)
+
+            # Wait for the list to be present
+            WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.CLASS_NAME, 'seller-list-scroll'))
+            )
+
+            # Locate and click the "카즈미" option
+            kazmi_store_option = self.driver.find_element(By.XPATH, '//label[.//span[contains(text(), "카즈미")]]')
+            kazmi_store_option.click()
+            time.sleep(1)
+        except Exception as e:
+            print(f"Error during initial store selection: {e}")
+        
         while True:
             try:
                 unanswered_comments_exist = self.process_comments()
@@ -59,10 +77,10 @@ class NaverSmartStoreBot:
                     self.process_reviews()
 
                     self.driver.get(comment_url)
-                time.sleep(30)
+                time.sleep(10)
             except Exception as e:
                 print(f"Error in main loop: {e}")
-                time.sleep(10)
+                time.sleep(3)
 
         self.driver.quit()
 
@@ -96,7 +114,7 @@ class NaverSmartStoreBot:
                     [
                         f'/html/body/ui-view[1]/div[3]/div/div[4]/div/ui-view[2]/ul/li[{i}]/ncp-comment-reply/div/form/div/div[1]/span/button',
                         f'/html/body/ui-view[1]/div[3]/div/div[4]/div/ui-view/div/div/div[2]/ui-view[2]/ul/li[{i}]/ncp-comment-reply/div/form/div/div[1]/span/button'
-                    ],
+                    ]
                 )
                 any_unanswered = True
         return any_unanswered
@@ -105,7 +123,7 @@ class NaverSmartStoreBot:
         consecutive_failures = 0
         max_consecutive_failures = 3
 
-        for j in range(1, 501):
+        for j in range(1, 100):
             if consecutive_failures >= max_consecutive_failures:
                 print(f"Too many consecutive failures. Returning to comment processing.")
                 return

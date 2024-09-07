@@ -1,4 +1,3 @@
-# answergenerator.py
 from openai import OpenAI
 import pandas as pd
 from fuzzywuzzy import process
@@ -27,8 +26,8 @@ class AnswerGenerator:
             같은 내용을 두번 반복하여 적지 않습니다.
             정확한 정보가 제공되지 않았습니다 라는 표현을 쓰지 않습니다.
 
-            답변생성시 질문:{question}이나 상품명:{product_name}에대해 반복하여 말하지 않습니다. 
-            상품명:{product_name}에 대해 문의 주셨군요 와 같이 {product_name},{question}을 반복하여 말하지 않습니다.
+            중요한건 답변생성시 질문:{question}이나 상품명:{product_name}에대해 반복하여 말하지 않습니다. 
+            상품명:{product_name}에 대해 문의 주셨군요 와 같이 {product_name},{question}을 말하지 않습니다.
 
             주문을 완료해주시면 이라는 표현을 쓰지 않습니다.
             고객 문의는 다음과 같이 두 가지 카테고리로 분류할 수 있습니다 라는 표현을 쓰지 않습니다.
@@ -39,6 +38,8 @@ class AnswerGenerator:
             고정 정보: 본사 직영매장인 "KZM STORE"에서 직접 보시고 구매하실수 있습니다. 매장 정보는 다음과 같습니다.  
             주소: 경기 김포시 양촌읍 양촌역길 80 "KZM TOWER" 영업시간: 10:00~19:00 (연중무휴)
             AS 접수 페이지 : https://support.kzmoutdoor.com
+            자사 쇼핑몰 : https://www.kzmmall.com/
+            부품 AS 전용 웹사이트: https://www.kzmmall.com/category/as부품/110/
 
             응답 가이드라인: 
             1. 긍정적인 문의에 대한 답변: 
@@ -100,10 +101,10 @@ class AnswerGenerator:
             print(f"가장 유사한 질문: {most_similar} (유사도 점수: {score})")
             similar_question_data = self.df[self.df['문의내용'] == most_similar].iloc[0]
             print(similar_question_data)
-            return similar_question_data
+            return similar_question_data, score
         except Exception as e:
             print(f"유사한 질문 찾기 오류: {e}")
-            return None
+            return None, 0
 
     def generate_answer(self, question, ocr_texts, product_name):
         try:
@@ -111,13 +112,16 @@ class AnswerGenerator:
             ocr_summary = " ".join(ocr_texts) if ocr_texts else "해당 제품에 대한 이미지에서 정보를 추출하지 않았습니다."
             image_summary = self.get_image_summary(ocr_summary) if ocr_texts else ocr_summary
 
-            similar_question_data = self.find_similar_question(question)
+            similar_question_data, score = self.find_similar_question(question)
             if similar_question_data is None:
                 similar_question_prompt = "죄송합니다. 데이터베이스에서 유사한 질문을 찾을 수 없습니다."
                 similar_question_answer = None
             else:
                 similar_question_answer = similar_question_data['답변내용']
-                similar_question_prompt = f"다음 유사 질문과 그 답변을 참고해 주세요:\n\nQ: {similar_question_data['문의내용']}\nA: {similar_question_answer}\n\n"
+                if score >= 90:
+                    similar_question_prompt = f"다음 모범 답안을 참고해 주세요 (유사도 점수: {score}):\n\nQ: {similar_question_data['문의내용']}\nA: {similar_question_answer}\n\n"
+                else:
+                    similar_question_prompt = f"다음 유사 질문과 그 답변을 참고해 주세요 (유사도 점수: {score}):\n\nQ: {similar_question_data['문의내용']}\nA: {similar_question_answer}\n\n"
 
             # 여기서 카테고리를 분류합니다
             category_info = self.classify_question(question)
@@ -127,14 +131,13 @@ class AnswerGenerator:
             # specific_prompt 디버그 출력
             print("카테고리:", category)
             print("적용된 specific_prompt:", specific_prompt)
-            
+
             answer_prompt = f"""
-            제공된 제품 정보 및 유사 질문 답변을 바탕으로 다음 문의에 답변해 주세요.
+            제공된 제품 정보 및 유사 질문 답변을 바탕으로 다음 문의에 답변해 주세요. 제품명과 고객질문을 언급하지 말아주세요.
             제품명: {product_name}
             고객 질문: {question}
             {similar_question_prompt}
             제품 정보: {image_summary}
-
             {specific_prompt}
             """
 
@@ -227,8 +230,8 @@ class AnswerGenerator:
         category_prompts = {
             "제품 리뷰": """
             고객님께서 작성하신 제품 리뷰를 토대로 가능한 친절하고 공손하게 응답해 주세요. 고객님의 피드백을 반영하여 개선될 점이 있다면 공감하며 답변해 주세요.
-            답변생성시: 질문:{question}이나 상품명:{product_name}에대해 반복하여 말하지 않습니다. 
-            상품명:{product_name}에 대해 문의 주셨군요 와 같이 {product_name},{question}을 반복하여 말하지 않습니다.
+            제품에관해 전혀 모름으로 제품에 대한 상세 설명을 넣지 않습니다.
+            임의로 제품의 사이즈나 특징들을 얘기하지 않습니다.
             """,
             "재고/입고/배송": """
             고객님께서 재고, 입고, 또는 배송에 관한 문의를 주셨습니다. 정확한 재고 상태, 입고 예정일, 배송 가능 여부 및 소요일 등에 대해 상세히 답변해 주세요.
@@ -236,21 +239,56 @@ class AnswerGenerator:
             오후1시 이전 주문건은 당일출고가 됩니다.
             오후1시 이후 주문건은 익일출고가 됩니다.
             추석 택배 마감은 9/12 오후 1시 이전 주문 건까지 추석 전 발송 가능하다고 안내합니다.
-            답변생성시: 질문:{question}이나 상품명:{product_name}에대해 반복하여 말하지 않습니다. 
-            상품명:{product_name}에 대해 문의 주셨군요 와 같이 {product_name},{question}을 반복하여 말하지 않습니다.
             """,
             "AS (수리, 반품, 교환)": """
             고객님께서 AS, 수리, 반품 또는 교환 절차에 대해 문의를 주셨습니다. 고객님의 불편을 최소화하기 위해 명확하고 자세한 절차를 안내해 주세요.
             AS에 괄호치거나 부가적 설명을 넣지 않습니다.
             인터넷 주소를 두번적지 않습니다.
             전화번호는 넣지 않습니다.
-            답변생성시: 질문:{question}이나 상품명:{product_name}에대해 반복하여 말하지 않습니다. 
-            상품명:{product_name}에 대해 문의 주셨군요 와 같이 {product_name},{question}을 반복하여 말하지 않습니다.
+            ### A/S 비용 안내 시스템
+
+            ## 텐트 수선 비용
+
+            다음 테이블은 텐트의 손상 범위(cm)에 따른 수선 비용입니다. 단위는 원(₩)입니다.
+
+            | 범류(cm) 및 범주  | ~ 3cm | 10cm ~ | 20cm ~ | 30cm ~ |
+            |------------------|-------|--------|--------|-------|
+            | 덧댐               | 30,000 | 50,000 | 60,000 | 상담   |
+            | 웰더 혹은 3cm~7cm | 30,000 | 불가    | 불가    | 상담   |
+            | 덧댐 + 박음질      | 50,000 | 70,000 | 90,000 | 상담   |
+
+            *수선 유형 설명:*
+            1. **덧댐**: 손상 부분에 패치를 덧대어 수선합니다.
+            2. **웰더 혹은 3cm~7cm**: 손상 부위를 용접 방식(습식 용접)으로 수선합니다.
+            3. **덧댐 + 박음질**: 패치를 덧댐과 동시에 박음질하여 내구성을 상승시킵니다.
+
+            *주의사항:*
+            - 손상된 부분에 따라 기본 수선비가 발생하며, 추천된 수선 방식에 따라 추가 비용이 발생합니다.
+            - 천의 상태 및 손상 부위 상황에 따라, 추가적인 지퍼 수선 또는 교체 작업이 권장될 수 있으며 이에 따른 추가비용이 발생할 수 있습니다.
+            - 큰 손상이나 수선이 불가한 손상의 경우, 천의 교체가 필요하며 이 경우 상담 후 비용이 결정됩니다.
+
+            ## 폴대 수선 비용
+
+            다음 테이블은 폴대의 마디 교체 비용입니다. 단위는 원(₩)입니다.
+
+            | 수량 및 범주 | 10대 | 20대 | 30대 | 40대 이상 |
+            |--------------|------|------|------|-----------|
+            | 폴대 테이프  | 10,000 | 20,000 | 30,000 | 40,000 |
+            | 수량 추가비용| 50,000 | 60,000 | 70,000 | 상담     |
+
+            *수선 유형 설명:*
+            1. **폴대 테이프 교체**: 폴대의 손상된 부분에 테이프를 부착하여 임시 수선합니다.
+            2. **수량 추가비용**: 수량이 많을수록 추가비용이 발생하며, 대량일 경우 일부 할인이 적용됩니다.
+
+            *주의사항:*
+            - 폴대는 손상 발생 시 철저한 점검을 통해 수선 또는 교체 작업이 필요합니다.
+            - 심한 손상으로 인해 수선이 불가한 경우, 폴대 전체를 교체해야 하며 이에 따른 추가비용이 발생할 수 있습니다.
+            - 폴대 수량에 따른 정밀 검사를 사전에 진행해야 하며, 검사 결과에 따라 추가 비용이 발생할 수 있습니다.
+
+            이 시스템은 주어진 기준에 따라 A/S 비용을 정확하게 계산하고 안내합니다. 고객이 필요한 정보를 명확하고 간결하게 제공하여 올바른 A/S 비용을 안내하십시오. 고객의 상황에 맞는 최선의 수선 방식을 추천하고, 가능한 한 정확한 비용 예산을 제공합니다.
             """,
             "사용법/호환성": """
             고객님께서 제품의 사용법 또는 다른 제품과의 호환성에 대해 문의를 주셨습니다. 제품의 사용 방법 및 호환 가능 여부를 상세하게 안내해 주세요.
-            답변생성시: 질문:{question}이나 상품명:{product_name}에대해 반복하여 말하지 않습니다. 
-            상품명:{product_name}에 대해 문의 주셨군요 와 같이 {product_name},{question}을 반복하여 말하지 않습니다.
             """,
             "제품 문의": """
             고객님께서 제품에 대한 구체적인 정보를 문의하셨습니다. 제품의 상세 정보 및 특징을 전달해 주세요.
@@ -259,23 +297,15 @@ class AnswerGenerator:
             선물세트 라는 단어가 제품명에 포함돼 있으면 매장안내나 as안내를 하지 않습니다.
             제품에 관해서는 최대한 긍정적으로 좋게 설명합니다.
             계산을 한다면 모든 수치에 대해서는 본제품과 작은 오차가 있을 수 있습니다. 라는 설명을 넣습니다.
-            답변생성시: 질문:{question}이나 상품명:{product_name}에대해 반복하여 말하지 않습니다. 
-            상품명:{product_name}에 대해 문의 주셨군요 와 같이 {product_name},{question}을 반복하여 말하지 않습니다.
             """,
             "할인 문의": """
             고객님께서 제품 할인에 대한 문의를 주셨습니다. 현재 진행중인 할인 정보 및 적용 조건을 안내해 주세요.
-            답변생성시: 질문:{question}이나 상품명:{product_name}에대해 반복하여 말하지 않습니다. 
-            상품명:{product_name}에 대해 문의 주셨군요 와 같이 {product_name},{question}을 반복하여 말하지 않습니다.
             """,
             "기술 지원": """
             고객님께서 기술 지원에 대해 문의하셨습니다. 가능한 신속하고 정확한 기술 지원을 제공해 주세요.
-            답변생성시: 질문:{question}이나 상품명:{product_name}에대해 반복하여 말하지 않습니다. 
-            상품명:{product_name}에 대해 문의 주셨군요 와 같이 {product_name},{question}을 반복하여 말하지 않습니다.
             """,
             "기타 질문": """
             고객님께서 기타 문의를 주셨습니다. 가능한 한 명확하고 유용한 답변을 제공해 주세요.
-            답변생성시: 질문:{question}이나 상품명:{product_name}에대해 반복하여 말하지 않습니다. 
-            상품명:{product_name}에 대해 문의 주셨군요 와 같이 {product_name},{question}을 반복하여 말하지 않습니다.
             """
         }
         return category_prompts.get(category, "")
