@@ -1,7 +1,9 @@
 from openai import OpenAI
 import pandas as pd
-from fuzzywuzzy import process
 import os
+import faiss
+from sentence_transformers import SentenceTransformer
+import numpy as np
 
 class AnswerGenerator:
     def __init__(self, openai_api_key, data_folder='data'):
@@ -29,7 +31,6 @@ class AnswerGenerator:
             답변생성시 질문:{question}이나 상품명:{product_name}에대해 언급 하지 않습니다. 
             예를들어:
             상품명:{product_name}에 대해 문의 주셨군요 와 같이 {product_name},{question}을 언급 하지 않습니다.
-
 
             주문을 완료해주시면 이라는 표현을 쓰지 않습니다.
             고객 문의는 다음과 같이 두 가지 카테고리로 분류할 수 있습니다 라는 표현을 쓰지 않습니다.
@@ -69,6 +70,7 @@ class AnswerGenerator:
                 - 간결하면서도 진심 어린 답변을 제공합니다. 기술적 용어나 전문 용어는 사용을 피하고, 고객이 이해하기 쉬운 언어로 답변합니다.
                 - 조사나 검색된 자료에 근거하여 정확한 근거를 제시합니다.
         """
+        self.model = SentenceTransformer('sentence-transformers/xlm-r-large-en-ko-nli-ststb')
         self.df = self.load_all_excel_files(data_folder)
 
         # 디버그: 데이터 확인을 위해 상위 5개 데이터 출력
@@ -78,9 +80,11 @@ class AnswerGenerator:
         if '문의내용' not in self.df.columns or '답변내용' not in self.df.columns:
             raise ValueError("엑셀 파일에는 '문의내용' 및 '답변내용' 컬럼이 포함되어야 합니다")
 
+        self.embeddings = self.generate_embeddings(self.df['문의내용'])
+        self.index = self.create_faiss_index(self.embeddings)
+
     def load_all_excel_files(self, folder_path):
         combined_df = pd.DataFrame()
-
         try:
             for file_name in os.listdir(folder_path):
                 if file_name.endswith('.xls') or file_name.endswith('.xlsx'):
@@ -88,9 +92,8 @@ class AnswerGenerator:
                     print(f"읽고 있는 파일: {file_path}")
                     if file_name.endswith('.xls'):
                         df = pd.read_excel(file_path, engine='xlrd')
-                    elif file_name.endswith('.xlsx'):
+                    else:
                         df = pd.read_excel(file_path, engine='openpyxl')
-
                     combined_df = pd.concat([combined_df, df], ignore_index=True)
 
             return combined_df
@@ -98,14 +101,27 @@ class AnswerGenerator:
             print(f"엑셀 파일 읽기 오류: {e}")
             raise
 
+    def generate_embeddings(self, texts):
+        """Generate embeddings for a list of texts."""
+        return self.model.encode(texts)
+
+    def create_faiss_index(self, embeddings):
+        """Create a FAISS index from embeddings."""
+        index = faiss.IndexFlatL2(embeddings.shape[1])
+        index.add(embeddings)
+        return index
+
     def find_similar_question(self, question):
         try:
-            question_titles = self.df['문의내용'].tolist()
-            most_similar, score = process.extractOne(question, question_titles)
-            print(f"가장 유사한 질문: {most_similar} (유사도 점수: {score})")
-            similar_question_data = self.df[self.df['문의내용'] == most_similar].iloc[0]
+            question_embedding = self.model.encode([question])
+            distances, indices = self.index.search(question_embedding, 1)
+            most_similar_idx = indices[0][0]
+            most_similar_question = self.df.iloc[most_similar_idx]['문의내용']
+            similarity_score = 100 - distances[0][0]  # Adjust the similarity score for easier interpretation
+            print(f"가장 유사한 질문: {most_similar_question} (유사도 점수: {similarity_score})")
+            similar_question_data = self.df.iloc[most_similar_idx]
             print(similar_question_data)
-            return similar_question_data, score
+            return similar_question_data, similarity_score
         except Exception as e:
             print(f"유사한 질문 찾기 오류: {e}")
             return None, 0
@@ -122,7 +138,7 @@ class AnswerGenerator:
                 similar_question_answer = None
             else:
                 similar_question_answer = similar_question_data['답변내용']
-                if score >= 90:
+                if score >= 92:
                     similar_question_prompt = f"다음 모범 답안을 참고해 주세요 (유사도 점수: {score}):\n\nQ: {similar_question_data['문의내용']}\nA: {similar_question_answer}\n\n"
                 else:
                     similar_question_prompt = f"다음 유사 질문과 그 답변을 참고해 주세요 (유사도 점수: {score}):\n\nQ: {similar_question_data['문의내용']}\nA: {similar_question_answer}\n\n"
@@ -251,45 +267,17 @@ class AnswerGenerator:
             전화번호는 넣지 않습니다.
             ### A/S 비용 안내 시스템
 
-            ## 텐트 수선 비용
+            폴대 서비스 1마디당 자사몰에서 10,000원씩 구매 하여
+            자가수리하는 방법 과 AS센터에서 진행하는 방식이 있습니다.
+            AS통해 진행시 폴대비용 + 점검비(10,0000)이 추가로 발생 됩니다.
+            https://support.kzmoutdoor.com/ 
+            통해 접수및 구매, 자가 수리영상 확인할수 있습니다.
 
-            다음 테이블은 텐트의 손상 범위(cm)에 따른 수선 비용입니다. 단위는 원(₩)입니다.
+            텐트 수선비용은 부위나 범위 따라 금액이 정해지므로 
+            정확한 안내는 어렵습니다. 
+            (다만, 최소 비용은 30,000부터 입니다.)
 
-            | 범류(cm) 및 범주  | ~ 3cm | 10cm ~ | 20cm ~ | 30cm ~ |
-            |------------------|-------|--------|--------|-------|
-            | 덧댐               | 30,000 | 50,000 | 60,000 | 상담   |
-            | 웰더 혹은 3cm~7cm | 30,000 | 불가    | 불가    | 상담   |
-            | 덧댐 + 박음질      | 50,000 | 70,000 | 90,000 | 상담   |
-
-            *수선 유형 설명:*
-            1. **덧댐**: 손상 부분에 패치를 덧대어 수선합니다.
-            2. **웰더 혹은 3cm~7cm**: 손상 부위를 용접 방식(습식 용접)으로 수선합니다.
-            3. **덧댐 + 박음질**: 패치를 덧댐과 동시에 박음질하여 내구성을 상승시킵니다.
-
-            *주의사항:*
-            - 손상된 부분에 따라 기본 수선비가 발생하며, 추천된 수선 방식에 따라 추가 비용이 발생합니다.
-            - 천의 상태 및 손상 부위 상황에 따라, 추가적인 지퍼 수선 또는 교체 작업이 권장될 수 있으며 이에 따른 추가비용이 발생할 수 있습니다.
-            - 큰 손상이나 수선이 불가한 손상의 경우, 천의 교체가 필요하며 이 경우 상담 후 비용이 결정됩니다.
-
-            ## 폴대 수선 비용
-
-            다음 테이블은 폴대의 마디 교체 비용입니다. 단위는 원(₩)입니다.
-
-            | 수량 및 범주 | 10대 | 20대 | 30대 | 40대 이상 |
-            |--------------|------|------|------|-----------|
-            | 폴대 테이프  | 10,000 | 20,000 | 30,000 | 40,000 |
-            | 수량 추가비용| 50,000 | 60,000 | 70,000 | 상담     |
-
-            *수선 유형 설명:*
-            1. **폴대 테이프 교체**: 폴대의 손상된 부분에 테이프를 부착하여 임시 수선합니다.
-            2. **수량 추가비용**: 수량이 많을수록 추가비용이 발생하며, 대량일 경우 일부 할인이 적용됩니다.
-
-            *주의사항:*
-            - 폴대는 손상 발생 시 철저한 점검을 통해 수선 또는 교체 작업이 필요합니다.
-            - 심한 손상으로 인해 수선이 불가한 경우, 폴대 전체를 교체해야 하며 이에 따른 추가비용이 발생할 수 있습니다.
-            - 폴대 수량에 따른 정밀 검사를 사전에 진행해야 하며, 검사 결과에 따라 추가 비용이 발생할 수 있습니다.
-
-            이 시스템은 주어진 기준에 따라 A/S 비용을 정확하게 계산하고 안내합니다. 고객이 필요한 정보를 명확하고 간결하게 제공하여 올바른 A/S 비용을 안내하십시오. 고객의 상황에 맞는 최선의 수선 방식을 추천하고, 가능한 한 정확한 비용 예산을 제공합니다.
+            https://support.kzmoutdoor.com/ 접수 후 입고 부탁드립니다.
             """,
             "사용법/호환성": """
             고객님께서 제품의 사용법 또는 다른 제품과의 호환성에 대해 문의를 주셨습니다. 제품의 사용 방법 및 호환 가능 여부를 상세하게 안내해 주세요.
