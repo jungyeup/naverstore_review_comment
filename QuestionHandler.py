@@ -23,7 +23,6 @@ class QuestionHandler:
             try:
                 label = self.driver.find_element(By.XPATH, label_xpath)
                 label_text = label.text.strip()
-                time.sleep(1)
                 if label_text == "미답변":
                     print(f"Question {i} is unanswered.")
                     return True
@@ -121,7 +120,7 @@ class QuestionHandler:
             product_num_element = self.driver.find_element(By.XPATH, product_name_xpath)
             self.driver.execute_script("arguments[0].removeAttribute('target')", product_num_element)
             product_num_element.click()
-            time.sleep(3)
+            time.sleep(1)
 
             scroll_button_xpaths = [
                 '//button[text()="상세정보 펼쳐보기"]',
@@ -137,7 +136,6 @@ class QuestionHandler:
                             self.driver.execute_script("arguments[0].scrollIntoView(true);", scroll_button)
                             time.sleep(1)
                             scroll_button.click()
-                            time.sleep(1)
                             break
                     except Exception as e:
                         continue
@@ -176,7 +174,7 @@ class QuestionHandler:
                 if user_input.lower() == '취소':
                     print("업로드가 취소되었습니다.")
                     self.driver.back()
-                    time.sleep(3)
+                    time.sleep(5)
                     return
                 if user_input.lower() == '재생성':
                     answer = self.answer_generator.generate_answer(question, ocr_summaries, product_name)
@@ -193,7 +191,8 @@ class QuestionHandler:
             print("Final Answer:", answer)
 
             self.driver.back()
-            time.sleep(3)
+
+            time.sleep(5)
 
             for xpath in click_to_answer_xpaths:
                 try:
@@ -209,7 +208,6 @@ class QuestionHandler:
                 try:
                     typing_area = WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, xpath)))
                     typing_area.send_keys(answer)
-                    time.sleep(1)
                     break
                 except Exception as e:
                     print(f"Could not find typing area with XPath {xpath}: {e}")
@@ -218,7 +216,6 @@ class QuestionHandler:
                 try:
                     upload_button = self.driver.find_element(By.XPATH, xpath)
                     upload_button.click()
-                    time.sleep(1)
                     self.dismiss_popup()
                     answer_button.click()
                     print(f"Answered question {i}")
@@ -233,7 +230,7 @@ class QuestionHandler:
         except Exception as e:
             print(f"Error answering question {i}: {e}")
             self.driver.back()
-            time.sleep(3)
+            time.sleep(2)
 
     def beep_sound(self):
         if platform.system() == "Windows":
@@ -271,7 +268,7 @@ class QuestionHandler:
                 try:
                     review_element = self.driver.find_element(By.XPATH, review_xpath)
                     review_element.click()
-                    time.sleep(3)
+                    time.sleep(1)
                     break
                 except:
                     continue
@@ -331,7 +328,6 @@ class QuestionHandler:
             print("Final Answer:", answer)
 
             reply_textarea.send_keys(answer)
-            time.sleep(1)
 
             try:
                 reply_button.click()
