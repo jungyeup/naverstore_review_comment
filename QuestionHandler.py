@@ -1,18 +1,21 @@
+import os
+import platform
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import NoSuchElementException, TimeoutException
 import pandas as pd
 import time
-import os
-import platform
+import ast
 
 class QuestionHandler:
     def __init__(self, driver, ocr_handler, answer_generator):
         self.driver = driver
         self.ocr_handler = ocr_handler
         self.answer_generator = answer_generator
-        self.df = pd.DataFrame(columns=["문의내용", "답변내용", "수정내용"])
-
+        self.excel_file_path = "data/questions_answers.xlsx"
+        self.df = pd.read_excel(self.excel_file_path) if os.path.exists(self.excel_file_path) else pd.DataFrame(columns=["상품명", "문의내용", "답변내용", "수정내용", "OCR내용"])
+    
     def is_unanswered(self, i):
         label_xpaths = [
             f'/html/body/ui-view[1]/div[3]/div/div[4]/div/ui-view/div/div/div[2]/ui-view[2]/ul/li[{i}]/div[2]/div[1]/span[1]',
@@ -32,6 +35,8 @@ class QuestionHandler:
                 else:
                     print(f"Unexpected label text for question {i}: {label_text}")
                     return False
+            except NoSuchElementException:
+                print(f"Element not found for XPath: {label_xpath}")
             except Exception as e:
                 print(f"Error checking unanswered status for question {i} with XPath {label_xpath}: {e}")
         return False
@@ -69,7 +74,7 @@ class QuestionHandler:
         try:
             popup_close_selectors = [
                 "//button[contains(text(), 'OK')]",
-                "//button[contains(text(), '확인')]", 
+                "//button[contains(text(), '확인')]",
                 "//button[contains(text(), '닫기')]",
                 "//button[@type='button' and @class='close' and @data-dismiss='modal' and @ng-click='vm.func.closeModal()' and @aria-label='닫기']/span[@aria-hidden='true']"
             ]
@@ -80,6 +85,8 @@ class QuestionHandler:
                         popup_close_button.click()
                         print("Popup closed.")
                         return True
+                except TimeoutException:
+                    continue
                 except Exception as e:
                     print(f"Could not close popup with selector {selector}: {e}")
             print("No popups to close or unhandled popup.")
@@ -99,6 +106,28 @@ class QuestionHandler:
                 break
             last_height = new_height
 
+    def get_ocr_summaries_for_product(self, product_name):
+        # Load existing data if any
+        if not self.df.empty:
+            existing_entry = self.df[self.df['상품명'] == product_name]
+            if not existing_entry.empty:
+                ocr_summaries = existing_entry.iloc[0]['OCR내용']
+                print(f"Using existing OCR summaries for product: {product_name}")
+                try:
+                    return ast.literal_eval(ocr_summaries)  # Safely convert string back to list
+                except Exception as e:
+                    print(f"Error parsing OCR summaries for product: {product_name}. Details: {e}")
+                    return []
+
+        print("No existing data found in the Excel file.")
+
+        # If OCR summaries for the product are not found, perform OCR extraction
+        ocr_summaries = self.extract_and_ocr_images()
+        if 'Failed to collect OCR summaries' in ocr_summaries:
+            print(f"Could not collect OCR summaries for product: {product_name}")
+            ocr_summaries = []
+        return ocr_summaries
+
     def handle_question(self, i, product_name_xpath, question_xpaths, click_to_answer_xpaths, typing_area_xpaths, upload_button_xpaths):
         try:
             question = None
@@ -107,9 +136,9 @@ class QuestionHandler:
                     question_element = self.driver.find_element(By.XPATH, xpath)
                     question = question_element.text
                     break
-                except:
+                except NoSuchElementException:
                     continue
-            
+
             if not question:
                 print(f"Could not find question element for index {i}")
                 return
@@ -145,10 +174,8 @@ class QuestionHandler:
             except Exception as e:
                 print(f"Scroll button processing error: {e}")
 
-            ocr_summaries = self.extract_and_ocr_images()
-            if 'Failed to collect OCR summaries' in ocr_summaries:
-                print(f"Could not collect OCR summaries for question: {question}")
-                ocr_summaries = []
+            # Get OCR summaries for the product
+            ocr_summaries = self.get_ocr_summaries_for_product(product_name)
 
             print(f"Extracted OCR summaries: {ocr_summaries}")
 
@@ -200,6 +227,8 @@ class QuestionHandler:
                     answer_button.click()
                     time.sleep(1)
                     break
+                except NoSuchElementException:
+                    continue
                 except Exception as e:
                     print(f"Could not click answer button with XPath {xpath}: {e}")
 
@@ -209,6 +238,8 @@ class QuestionHandler:
                     typing_area = WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, xpath)))
                     typing_area.send_keys(answer)
                     break
+                except NoSuchElementException:
+                    continue
                 except Exception as e:
                     print(f"Could not find typing area with XPath {xpath}: {e}")
 
@@ -220,10 +251,19 @@ class QuestionHandler:
                     answer_button.click()
                     print(f"Answered question {i}")
                     break
+                except NoSuchElementException:
+                    continue
                 except Exception as e:
                     print(f"Could not find upload button with XPath {xpath}: {e}")
 
-            new_entry = pd.DataFrame({"문의내용": [question], "답변내용": [answer], "수정내용": [modification_note]})
+            # Include OCR summaries in the DataFrame entry
+            new_entry = pd.DataFrame({
+                "상품명": [product_name],
+                "문의내용": [question],
+                "답변내용": [answer],
+                "수정내용": [modification_note],
+                "OCR내용": [str(ocr_summaries)]  # Store OCR summaries as a string
+            })
             self.df = pd.concat([self.df, new_entry], ignore_index=True)
             self.save_to_excel()
 
@@ -242,9 +282,8 @@ class QuestionHandler:
             print('\a')
 
     def save_to_excel(self):
-        file_path = "data/questions_answers.xlsx"
-        self.df.to_excel(file_path, index=False)
-        print(f"Saved questions and answers to {file_path}")
+        self.df.to_excel(self.excel_file_path, index=False)
+        print(f"Saved questions and answers to {self.excel_file_path}")
 
     def handle_review(self, product_name_xpaths, review_xpaths, review_text_xpath, reply_textarea_xpath, reply_button_xpath):
         try:
@@ -256,7 +295,7 @@ class QuestionHandler:
                     product_name_element = self.driver.find_element(By.XPATH, product_name_xpath)
                     product_name = product_name_element.text if product_name_element else "해당 제품"
                     break
-                except:
+                except NoSuchElementException:
                     continue
 
             if not product_name_element:
@@ -270,7 +309,7 @@ class QuestionHandler:
                     review_element.click()
                     time.sleep(1)
                     break
-                except:
+                except NoSuchElementException:
                     continue
 
             if not review_element:
@@ -293,12 +332,15 @@ class QuestionHandler:
             # Check if reply button is available before generating an answer
             try:
                 reply_button = self.driver.find_element(By.XPATH, reply_button_xpath)
-            except:
+            except NoSuchElementException:
                 print("Reply button not found. This review might already have a reply.")
                 self.driver.find_element(By.XPATH, '//button[@type="button" and @class="close" and @data-dismiss="modal" and @ng-click="vm.func.closeModal()" and @aria-label="닫기"]/span[@aria-hidden="true"]').click()
                 return
 
-            answer = self.answer_generator.generate_answer(review_text, [], product_name)
+            # Get OCR summaries for the product review
+            ocr_summaries = self.get_ocr_summaries_for_product(product_name)
+            
+            answer = self.answer_generator.generate_answer(review_text, ocr_summaries, product_name)
             modification_note = "자동 생성된 답글"
 
             original_answer = answer
@@ -314,7 +356,7 @@ class QuestionHandler:
                     self.driver.find_element(By.XPATH, '//button[@type="button" and @class="close" and @data-dismiss="modal" and @ng-click="vm.func.closeModal()" and @aria-label="닫기"]/span[@aria-hidden="true"]').click()
                     return
                 if user_input.lower() == '재생성':
-                    answer = self.answer_generator.generate_answer(review_text, [], product_name)
+                    answer = self.answer_generator.generate_answer(review_text, ocr_summaries, product_name)
                     original_answer = answer
                     print("Regenerated Answer:", answer)
                     modification_note = "자동 생성된 답글 (재생성)"
@@ -332,7 +374,7 @@ class QuestionHandler:
             try:
                 reply_button.click()
                 time.sleep(1)
-            except:
+            except NoSuchElementException:
                 print("Reply button not found. This review might already have a reply.")
                 self.driver.find_element(By.XPATH, '//button[@type="button" and @class="close" and @data-dismiss="modal" and @ng-click="vm.func.closeModal()" and @aria-label="닫기"]/span[@aria-hidden="true"]').click()
                 return
@@ -345,5 +387,5 @@ class QuestionHandler:
             print(f"Error handling review: {e}")
             try:
                 self.driver.find_element(By.XPATH, '//button[@type="button" and @class="close" and @data-dismiss="modal" and @ng-click="vm.func.closeModal()" and @aria-label="닫기"]/span[@aria-hidden="true"]').click()
-            except:
-                pass
+            except Exception as e:
+                print(f"Error closing modal after handling review failure: {e}")

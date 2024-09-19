@@ -7,7 +7,7 @@ from bs4 import BeautifulSoup
 from openai import OpenAI
 from dotenv import load_dotenv
 import os
-import json
+
 
 class OCRHandler:
     def __init__(self):
@@ -19,16 +19,15 @@ class OCRHandler:
 
         self.client = OpenAI(api_key=openai_api_key)
         self.system_prompt = """
-        당신은 다양한 데이터 소스(이미지, OCR, HTML)에서 추출된 정보를 바탕으로 상품에 대해 종합적으로 분석하고, 
-        매우 자세한 설명을 제공하는 AI 에이전트입니다. 당신의 목표는 모든 가용 데이터를 활용하여 사용자가 상품의 주요 특징, 사양, 
-        장단점, 용도, 및 관련 정보를 이해할 수 있도록 돕는 것입니다.
+        당신은 다양한 데이터 소스(이미지, OCR, HTML)에서 추출된 정보를 바탕으로 상품에 대해 종합적으로 분석하고, 매우 자세한 설명을 제공하는 AI 에이전트입니다. 
+        당신의 목표는 모든 가용 데이터를 활용하여 사용자가 상품의 주요 특징, 사양, 장단점, 용도, 및 관련 정보를 이해할 수 있도록 돕는 것입니다.
 
         다음의 지침을 따르십시오:
 
         데이터 통합:
-        이미지에서 추출된 시각적 정보를 텍스트로 변환하여 분석하십시오. 이 정보에는 상품의 외관, 디자인, 색상, 로고, 텍스트 등이 포함될 수 있습니다.
+        이미지에서 추출된 시각적 정보를 텍스트로 변환하여 분석하십시오. 이 정보에는 상품의 사이즈, 상품의 크기, 상품의 외관, 디자인, 색상, 로고, 텍스트 등이 포함될 수 있습니다.
         OCR 데이터를 활용하여 상품의 라벨, 설명서, 광고 텍스트 등에서 추출된 텍스트 정보를 분석하십시오.
-        HTML에서 추출된 텍스트 데이터는 웹페이지에서 제공하는 공식 정보, 고객 리뷰, 기술 사양, 가격 비교, 할인 정보 등을 포함할 수 있습니다.
+        HTML에서 추출된 텍스트 데이터는 웹페이지에서 제공하는 공식 정보, 고객 리뷰, 기술 사양, 가격 비교, 상품의 사이즈, 상품의 크기, 할인 정보 등을 포함할 수 있습니다.
         상품 요약:
 
         모든 출처의 데이터를 종합하여 상품의 이름, 브랜드, 모델, 주요 특징, 사양 등을 정확하게 요약하십시오.
@@ -36,7 +35,8 @@ class OCRHandler:
         가격 정보가 포함되어 있다면, 시장에서의 경쟁력 및 할인 정보도 함께 설명하십시오.
         세부 정보 제공:
 
-        상품의 각 주요 특징에 대해 상세히 설명하십시오. 예를 들어, 기술적 사양이 중요한 경우, 이를 깊이 있게 분석하십시오.
+        크기와 사이즈가 중요한 경우, 이를 깊이 있게 분석하십시오.
+        이미지나 OCR에서 추출된 특정 텍스트(예: 가로,세로,높이,측면,안쪽,외관,특정위치 사이즈)가 중요한 경우 이를 강조하여 설명하십시오.
         이미지나 OCR에서 추출된 특정 텍스트(예: "Made in Italy", "100% organic")가 중요한 경우 이를 강조하여 설명하십시오.
         구조화된 정보:
 
@@ -52,10 +52,22 @@ class OCRHandler:
 
         여러 소스에서 얻은 정보를 종합하여, 일관성 있는 결론을 도출하십시오. 서로 다른 출처에서 상반된 정보가 있을 경우, 가능한 경우 출처를 명시하고 이를 설명하십시오.
         """
+    
+    @staticmethod
+    def ocr_from_image(img):
+        """Performs OCR on an image and returns detected text along with image size."""
+        try:
+            # Perform OCR for Korean and English
+            text_kor = pytesseract.image_to_string(img, lang='kor')
+            text_eng = pytesseract.image_to_string(img, lang='eng')
+
+            return text_kor + " " + text_eng, img.size
+        except Exception as e:
+            return "", None
 
     @staticmethod
     def ocr_from_image_url(image_url):
-        """Performs OCR on an image from a given URL."""
+        """Performs OCR on an image from a URL and returns size metadata."""
         try:
             if 'data:image' in image_url:
                 header, encoded = image_url.split(",", 1)
@@ -66,13 +78,9 @@ class OCRHandler:
                 response.raise_for_status()
                 img = Image.open(BytesIO(response.content))
 
-            # Perform OCR for Korean and English
-            text_kor = pytesseract.image_to_string(img, lang='kor')
-            text_eng = pytesseract.image_to_string(img, lang='eng')
-
-            return text_kor + " " + text_eng
+            return OCRHandler.ocr_from_image(img)
         except Exception as e:
-            return ""
+            return "", None
 
     @staticmethod
     def extract_image_urls_from_html(html_content):
@@ -102,7 +110,8 @@ class OCRHandler:
     @staticmethod
     def is_xpath_like_image_url(url):
         """Checks if the image URL fits the specified xpath-like pattern."""
-        return 'cdn.kzmoutdoor.com/shop_image' in url
+        # Updated to include 'shop-phinf.pstatic.net'
+        return 'cdn.kzmoutdoor.com/shop_image' in url or 'shop-phinf.pstatic.net' in url
 
     def ocr_from_html_content(self, html_content):
         """Performs OCR on all images found within the provided HTML content
@@ -115,9 +124,9 @@ class OCRHandler:
 
         for image_url in image_urls:
             if self.is_xpath_like_image_url(image_url):
-                result = self.ocr_from_image_url(image_url)
+                result, img_size = self.ocr_from_image_url(image_url)
                 if result:
-                    ocr_results.append(result)
+                    ocr_results.append(f"Image Size: {img_size}\n{result}")
 
         # Append HTML text to the results
         ocr_results.append(html_text)

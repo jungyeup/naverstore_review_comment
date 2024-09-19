@@ -45,9 +45,9 @@ class NaverSmartStoreBot:
         self.driver.get(comment_url)
 
         self.login_handler.login(
-            '/html/body/div/div/div[1]/div/div/div[4]/div[1]/div/ul[1]/li[1]/input',
-            '/html/body/div/div/div[1]/div/div/div[4]/div[1]/div/ul[1]/li[2]/input',
-            '/html/body/div/div/div[1]/div/div/div[4]/div[1]/div/div/button'
+            '/html/body/div/div/div[1]/div/div/div[4]/div[1]/div/ul[1]/li[1]/input', #id_xpath
+            '/html/body/div/div/div[1]/div/div/div[4]/div[1]/div/ul[1]/li[2]/input', #password_xpath
+            '/html/body/div/div/div[1]/div/div/div[4]/div[1]/div/div/button' #login_button_xpath
         )
         time.sleep(2)
 
@@ -65,6 +65,7 @@ class NaverSmartStoreBot:
             kazmi_store_option = self.driver.find_element(By.XPATH, '//label[.//span[contains(text(), "카즈미")]]')
             time.sleep(1)
             kazmi_store_option.click()
+            time.sleep(2)
         except Exception as e:
             print(f"Error during initial store selection: {e}")
 
@@ -82,8 +83,6 @@ class NaverSmartStoreBot:
                 print(f"Error in main loop: {e}")
                 time.sleep(1)
 
-        self.driver.quit()
-
     def process_comments(self):
         self.driver.refresh()
 
@@ -98,21 +97,21 @@ class NaverSmartStoreBot:
             if self.question_handler.is_unanswered(i):
                 self.question_handler.handle_question(
                     i,
-                    f'/html/body/ui-view[1]/div[3]/div/div[4]/div/ui-view/div/div/div[2]/ui-view[2]/ul/li[{i}]/div[2]/div[1]/a',
+                    f'/html/body/ui-view[1]/div[3]/div/div[4]/div/ui-view/div/div/div[2]/ui-view[2]/ul/li[{i}]/div[2]/div[1]/a', #product_name_xpath
                     [
-                        f'/html/body/ui-view[1]/div[3]/div/div[4]/div/ui-view/div/div/div[2]/ui-view[2]/ul/li[{i}]/div[2]/p',
+                        f'/html/body/ui-view[1]/div[3]/div/div[4]/div/ui-view/div/div/div[2]/ui-view[2]/ul/li[{i}]/div[2]/p',#question_xpaths
                         f'/html/body/ui-view[1]/div[3]/div/div[4]/div/ui-view[2]/ul/li[{i}]/div[2]/p'
                     ],
                     [
-                        f'/html/body/ui-view[1]/div[3]/div/div[4]/div/ui-view[2]/ul/li[{i}]/div[2]/div[3]/button',
+                        f'/html/body/ui-view[1]/div[3]/div/div[4]/div/ui-view[2]/ul/li[{i}]/div[2]/div[3]/button', #click_to_answer_xpaths
                         f'/html/body/ui-view[1]/div[3]/div/div[4]/div/ui-view/div/div/div[2]/ui-view[2]/ul/li[{i}]/div[2]/div[3]/button'
                     ],
                     [
-                        f'/html/body/ui-view[1]/div[3]/div/div[4]/div/ui-view[2]/ul/li[{i}]/ncp-comment-reply/div/form/div/div[1]/div/textarea',
+                        f'/html/body/ui-view[1]/div[3]/div/div[4]/div/ui-view[2]/ul/li[{i}]/ncp-comment-reply/div/form/div/div[1]/div/textarea', #typing_area_xpaths
                         f'/html/body/ui-view[1]/div[3]/div/div[4]/div/ui-view/div/div/div[2]/ui-view[2]/ul/li[{i}]/ncp-comment-reply/div/form/div/div[1]/div/textarea'
                     ],
                     [
-                        f'/html/body/ui-view[1]/div[3]/div/div[4]/div/ui-view[2]/ul/li[{i}]/ncp-comment-reply/div/form/div/div[1]/span/button',
+                        f'/html/body/ui-view[1]/div[3]/div/div[4]/div/ui-view[2]/ul/li[{i}]/ncp-comment-reply/div/form/div/div[1]/span/button',  #upload_button_xpaths
                         f'/html/body/ui-view[1]/div[3]/div/div[4]/div/ui-view/div/div/div[2]/ui-view[2]/ul/li[{i}]/ncp-comment-reply/div/form/div/div[1]/span/button'
                     ]
                 )
