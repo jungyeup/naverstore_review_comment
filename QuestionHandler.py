@@ -26,10 +26,10 @@ class QuestionHandler:
             try:
                 label = self.driver.find_element(By.XPATH, label_xpath)
                 label_text = label.text.strip()
-                if label_text == "미답변":
+                if label_text == "답변완료":
                     print(f"Question {i} is unanswered.")
                     return True
-                elif label_text == "답변완료":
+                elif label_text == "미답변":
                     print(f"Question {i} is already answered.")
                     return False
                 else:

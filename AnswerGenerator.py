@@ -9,7 +9,7 @@ class AnswerGenerator:
     def __init__(self, openai_api_key, data_folder='data'):
         self.client = OpenAI(api_key=openai_api_key)
         self.system_prompt = """
-            당신은 자사 쇼핑몰 고객 문의에 응답하는 친절한 상담원입니다. 한국어 문법을 정확히 지키고, 
+            당신은 자사 쇼핑몰 고객 문의에 응답하는 친절한 상담원입니다. 한국어 문법을 정확히 지키고, 띄어쓰기도 정확하게 합니다.
             고객의 문의에 대해 친절하고 공손하며 정확한 답변을 제공합니다.
             시작은 모두 친절한 인사말과 함께 시작하며 마무리 인사또한 가이드에 따릅니다. 
             모든 응답은 명확한 문장으로 문제 해결을 지원해야 하며, {question}에 대하여 Chain of Thought 접근법을 활용하여 문의를 단계적으로 분석합니다.
@@ -30,6 +30,7 @@ class AnswerGenerator:
             제품에 관해서는 최대한 긍정적으로 좋게 설명합니다.
             같은 내용을 두번 반복하여 적지 않습니다.
             정확한 정보가 제공되지 않았습니다 라는 표현을 쓰지 않습니다.
+            실제 제품의 크기는 최대 ±5 정도의 오차가 발생할 수 있습니다. 이는 제조 공정상의 특성으로 인한 것입니다.
 
             답변생성시 질문:{question}이나 상품명:{product_name}에대해 절대 언급 하지 않습니다. 
             예를들어:
@@ -132,7 +133,6 @@ class AnswerGenerator:
 
     def generate_answer(self, question, ocr_texts, product_name):
         try:
-            # Always include OCR summaries if they exist
             ocr_summary = " ".join(ocr_texts) if ocr_texts else "해당 제품에 대한 이미지에서 정보를 추출하지 않았습니다."
             image_summary = self.get_image_summary(ocr_summary) if ocr_texts else ocr_summary
 
@@ -147,13 +147,11 @@ class AnswerGenerator:
                 else:
                     similar_question_prompt = f"다음 유사 질문과 그 답변을 참고해 주세요 (유사도 점수: {score}):\n\nQ: {similar_question_data['문의내용']}\nA: {similar_question_answer}\n\n"
 
-            # 여기서 카테고리를 분류합니다
             category_info = self.classify_question(question)
-            category = self.extract_category_from_classification(category_info)
-            specific_prompt = self.get_specific_prompt(category)
+            categories = self.extract_category_from_classification(category_info)
+            specific_prompt = self.get_specific_prompt(categories)
 
-            # specific_prompt 디버그 출력
-            print("카테고리:", category)
+            print("카테고리들:", categories)
             print("적용된 specific_prompt:", specific_prompt)
 
             answer_prompt = f"""
@@ -223,7 +221,7 @@ class AnswerGenerator:
     def classify_question(self, question):
         try:
             classification_prompt = f"""
-            다음 고객 문의를 아래 카테고리 중 하나로 분류해 주세요:
+            다음 고객 문의를 관련된 모든 카테고리로 분류해 주세요. 여러 카테고리가 관련된 경우 모두 표시해 주세요.
             카테고리 목록: [제품 리뷰, 재고/입고/배송, AS (수리, 반품, 교환), 사용법/호환성, 제품 문의, 할인 문의, 기술 지원, 기타 질문]
             고객 문의: {question}
             """
@@ -245,12 +243,10 @@ class AnswerGenerator:
     def extract_category_from_classification(self, category_info):
         categories = ["제품 리뷰", "재고/입고/배송", "AS (수리, 반품, 교환)", 
                       "사용법/호환성", "제품 문의", "할인 문의", "기술 지원", "기타 질문"]
-        for category in categories:
-            if category in category_info:
-                return category
-        return "기타 질문"
+        detected_categories = [category for category in categories if category in category_info]
+        return detected_categories
 
-    def get_specific_prompt(self, category):
+    def get_specific_prompt(self, categories):
         category_prompts = {
             "제품 리뷰": """
             고객님께서 작성하신 제품 리뷰를 토대로 가능한 친절하고 공손하게 응답해 주세요. 고객님의 피드백을 반영하여 개선될 점이 있다면 공감하며 답변해 주세요.
@@ -259,7 +255,8 @@ class AnswerGenerator:
             """,
             "재고/입고/배송": """
             고객님께서 재고, 입고, 또는 배송에 관한 문의를 주셨습니다. 정확한 재고 상태, 입고 예정일, 배송 가능 여부 및 소요일 등에 대해 상세히 답변해 주세요.
-            재고는 항상 있습니다.
+            주문가능하거나 주문된 제품의 재고는 항상 있습니다.
+            단종은 아니지만 재입고 날짜가 확정되지 않아 당분간은 구매가 어렵습니다.
             오후1시 이전 주문건은 당일출고가 됩니다.
             오후1시 이후 주문건은 익일출고가 됩니다.
             """,
@@ -269,6 +266,7 @@ class AnswerGenerator:
             인터넷 주소를 두번적지 않습니다.
             전화번호는 넣지 않습니다.
             금액을 절대 표기하지 않습니다.
+            실제 제품의 크기는 최대 ±5 정도의 오차가 발생할 수 있습니다. 이는 제조 공정상의 특성으로 인한 것입니다.
             ### A/S 비용 안내 시스템
 
             금액을 절대 표기하지 않습니다.
@@ -294,6 +292,8 @@ class AnswerGenerator:
             선물세트 라는 단어가 제품명에 포함돼 있으면 매장안내나 as안내를 하지 않습니다.
             제품에 관해서는 최대한 긍정적으로 좋게 설명합니다.
             계산을 한다면 모든 수치에 대해서는 본제품과 작은 오차가 있을 수 있습니다. 라는 설명을 넣습니다.
+            실제 제품의 크기는 최대 ±5 정도의 오차가 발생할 수 있습니다. 이는 제조 공정상의 특성으로 인한 것입니다.
+            단종은 아니지만 재입고 날짜가 확정되지 않아 당분간은 구매가 어렵습니다.
             """,
             "할인 문의": """
             고객님께서 제품 할인에 대한 문의를 주셨습니다. 현재 진행중인 할인 정보 및 적용 조건을 안내해 주세요.
@@ -305,4 +305,5 @@ class AnswerGenerator:
             고객님께서 기타 문의를 주셨습니다. 가능한 한 명확하고 유용한 답변을 제공해 주세요.
             """
         }
-        return category_prompts.get(category, "")
+        prompt = "\n".join([category_prompts[cat] for cat in categories])
+        return prompt
