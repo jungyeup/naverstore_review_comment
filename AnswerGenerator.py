@@ -34,6 +34,7 @@ class AnswerGenerator:
             정확한 정보가 제공되지 않았습니다 라는 표현을 쓰지 않습니다.
             실제 제품의 크기는 최대 ±5 정도의 오차가 발생할 수 있습니다. 이는 제조 공정상의 특성으로 인한 것입니다.
 
+            무엇무엇인것 같습니다와 같은 추상적 표현을 쓰지 마십시오.
             답변생성시 질문:{question}이나 상품명:{product_name}에대해 절대 언급 하지 않습니다. 
             예를들어:
             상품명:{product_name}에 대해 문의 주셨군요 와 같이 {product_name},{question}을 절대 언급 하지 않습니다.
@@ -44,7 +45,8 @@ class AnswerGenerator:
             확인해보겠다는 말을 하지 않습니다. 정보를 기반으로 최대한 문제를 해결합니다.
             계산식이나 수학식을 표시할때 영어를 쓰지않고 기호를 사용합니다. 최대한 간단하게 구성합니다.
             정확한 계산방법과 근거를 말하세요.
-            정보가 정확히 기재가 돼 있지 않으면 근거를 찾아 계산하거나 산출하세요. 계산이나 산출이 안된다면 톡톡문의로 넘기세요.
+            정보가 정확히 기재가 돼 있지 않으면 근거를 찾아 계산하거나 산출하세요. 계산과 산출은 수학적으로 정확해야 합니다.
+            만약 계산이나 산출이 안된다면 톡톡문의로 넘기세요.
 
             고정 정보: 본사 직영매장인 "KZM STORE"에서 직접 보시고 구매하실수 있습니다. 매장 정보는 다음과 같습니다.  
             주소: 경기 김포시 양촌읍 양촌역길 80 "KZM TOWER" 영업시간: 10:00~19:00 (연중무휴)
@@ -134,13 +136,11 @@ class AnswerGenerator:
             print(f"유사한 질문 찾기 오류: {e}")
             return None, 0
 
-    def generate_answer(self, question, ocr_summaries, product_name):
+    def generate_answer(self, question, ocr_summaries, product_name, comment_time, current_time):
         try:
-            # Check if the question is important and show popup if needed
             if self.check_if_important_question(question):
                 self.show_popup_and_wait(question)
 
-            # Use OCR summaries directly as provided
             image_summary = ocr_summaries if ocr_summaries else "해당 제품에 대한 이미지에서 정보를 추출하지 않았습니다."
 
             similar_question_data, score = self.find_similar_question(question)
@@ -165,6 +165,8 @@ class AnswerGenerator:
             제공된 제품 정보 및 유사 질문 답변을 바탕으로 다음 문의에 답변해 주세요. 제품명과 고객질문을 언급하지 말아주세요.
             제품명: {product_name}
             고객 질문: {question}
+            질문 시간: {comment_time} 
+            현재 시간: {current_time}
             {similar_question_prompt}
             제품 정보: {image_summary}
             {specific_prompt}
@@ -172,7 +174,7 @@ class AnswerGenerator:
 
             chat_completion = self.client.chat.completions.create(
                 model="gpt-4o",
-                temperature=0.8,
+                temperature=0.7,
                 messages=[
                     {"role": "system", "content": self.system_prompt},
                     {"role": "user", "content": answer_prompt}
@@ -186,9 +188,6 @@ class AnswerGenerator:
             return "죄송합니다, 답변을 생성할 수 없습니다."
 
     def check_if_important_question(self, question):
-        """
-        GPT-4o에게 질문이 특정 조건을 충족하는지 판단하게 합니다.
-        """
         try:
             check_prompt = f"""
             다음 고객 문의가 아래 카테고리와 관련이 있는지 판단해 주세요.
@@ -210,7 +209,7 @@ class AnswerGenerator:
 
             chat_completion = self.client.chat.completions.create(
                 model="gpt-4o",
-                temperature=0.8,
+                temperature=0.7,
                 messages=[
                     {"role": "system", "content": self.system_prompt},
                     {"role": "user", "content": check_prompt}
@@ -223,10 +222,6 @@ class AnswerGenerator:
             return False
 
     def show_popup_and_wait(self, question):
-        """
-        중요한 질문일 경우 윈도우 팝업창을 띄워 알리고, 확인 버튼을 누를 때까지 대기합니다.
-        """
-        # MB_ICONINFORMATION (0x00000040L) | MB_OK (0x00000000L) | MB_TOPMOST (0x00040000L) | MB_SYSTEMMODAL (0x00001000L)
         message_box_styles = 0x00000040 | 0x00000000 | 0x00040000 | 0x00001000
         ctypes.windll.user32.MessageBoxW(0, f"중요한 고객 문의가 들어왔습니다:\n\n{question}", "중요한 문의 알림", message_box_styles)
 
@@ -240,7 +235,7 @@ class AnswerGenerator:
 
             chat_completion = self.client.chat.completions.create(
                 model="gpt-4o",
-                temperature=0.8,
+                temperature=0.7,
                 messages=[
                     {"role": "system", "content": self.system_prompt},
                     {"role": "user", "content": revision_prompt}

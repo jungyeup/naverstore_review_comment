@@ -137,7 +137,7 @@ class QuestionHandler:
             ocr_summaries = []
         return ocr_summaries
 
-    def handle_question(self, i, product_name_xpath, question_xpaths, click_to_answer_xpaths, typing_area_xpaths, upload_button_xpaths):
+    def handle_question(self, i, product_name_xpath, question_xpaths, click_to_answer_xpaths, typing_area_xpaths, upload_button_xpaths, comment_time_xpath):
         try:
             question = None
             for xpath in question_xpaths:
@@ -154,6 +154,9 @@ class QuestionHandler:
 
             product_name_element = WebDriverWait(self.driver, 10).until(EC.presence_of_element_located((By.XPATH, product_name_xpath)))
             product_name = product_name_element.text if product_name_element else "해당 제품"
+
+            comment_time_element = WebDriverWait(self.driver, 10).until(EC.presence_of_element_located((By.XPATH, comment_time_xpath)))
+            comment_time = comment_time_element.text
 
             product_num_element = self.driver.find_element(By.XPATH, product_name_xpath)
             self.driver.execute_script("arguments[0].removeAttribute('target')", product_num_element)
@@ -199,8 +202,9 @@ class QuestionHandler:
 
             print(f"Extracted OCR summaries: {ocr_summaries}")
 
+            current_time = time.strftime("%Y-%m-%d %H:%M:%S")
 
-            answer = self.answer_generator.generate_answer(question, ocr_summaries, product_name)
+            answer = self.answer_generator.generate_answer(question, ocr_summaries, product_name, comment_time, current_time)
             modification_note = "자동 생성된 답변"
 
             if not answer:
@@ -225,7 +229,7 @@ class QuestionHandler:
                     time.sleep(5)
                     return
                 if user_input.lower() == '재생성':
-                    answer = self.answer_generator.generate_answer(question, ocr_summaries, product_name)
+                    answer = self.answer_generator.generate_answer(question, ocr_summaries, product_name, comment_time, current_time)
                     original_answer = answer
                     print("Regenerated Answer:", answer)
                     modification_note = "자동 생성된 답변 (재생성)"

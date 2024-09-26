@@ -1,4 +1,5 @@
 import time
+import os
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.chrome.options import Options
@@ -12,7 +13,7 @@ from LoginHandler import LoginHandler
 from ocr_handler import OCRHandler
 from AnswerGenerator import AnswerGenerator
 from QuestionHandler import QuestionHandler
-import os
+from report_generator import ReportGenerator
 
 
 class NaverSmartStoreBot:
@@ -38,6 +39,8 @@ class NaverSmartStoreBot:
 
         self.question_handler = QuestionHandler(self.driver, self.ocr_handler, self.answer_generator)
 
+        self.report_generator = ReportGenerator(self.config['OPENAI_API_KEY'])
+
     def run(self):
         comment_url = "https://sell.smartstore.naver.com/#/comment/"
         review_url = "https://sell.smartstore.naver.com/#/review/search"
@@ -51,17 +54,14 @@ class NaverSmartStoreBot:
         )
         time.sleep(2)
 
-        # Perform initial store selection
         try:
             store_select_button = self.driver.find_element(By.XPATH, '//a[@role="button" and @ui-sref="work.channel-select" and @data-action-location-id="selectStore"]')
             store_select_button.click()
             time.sleep(1)
-            # Wait for the list to be present
             WebDriverWait(self.driver, 10).until(
                 EC.presence_of_element_located((By.CLASS_NAME, 'seller-list-scroll'))
             )
 
-            # Locate and click the "카즈미" option
             kazmi_store_option = self.driver.find_element(By.XPATH, '//label[.//span[contains(text(), "카즈미")]]')
             time.sleep(1)
             kazmi_store_option.click()
@@ -69,21 +69,31 @@ class NaverSmartStoreBot:
         except Exception as e:
             print(f"Error during initial store selection: {e}")
 
+        daily_report_data = []
+
         while True:
             try:
-                unanswered_comments_exist = self.process_comments()
+                unanswered_comments_exist = self.process_comments(daily_report_data)
 
                 if not unanswered_comments_exist:
                     self.driver.get(review_url)
-                    self.process_reviews()
+                    self.process_reviews(daily_report_data)
 
                     self.driver.get(comment_url)
                 time.sleep(3)
             except Exception as e:
+                daily_report_data.append({
+                    'timestamp': time.strftime("%Y-%m-%d %H:%M:%S"),
+                    'type': "Error",
+                    'url': self.driver.current_url,
+                    'error_message': str(e)
+                })
                 print(f"Error in main loop: {e}")
                 time.sleep(1)
 
-    def process_comments(self):
+        self.report_generator.generate_reports(daily_report_data)
+
+    def process_comments(self, report_data):
         self.driver.refresh()
 
         WebDriverWait(self.driver, 10).until(
@@ -95,7 +105,9 @@ class NaverSmartStoreBot:
         any_unanswered = False
         for i in range(1, 9):
             if self.question_handler.is_unanswered(i):
-                self.question_handler.handle_question(
+                comment_time_xpath = f'/html/body/ui-view[1]/div[3]/div/div[4]/div/ui-view/div/div/div[2]/ui-view[2]/ul/li[{i}]/div[2]/div[2]/span[4]'
+                
+                comment_data = self.question_handler.handle_question(
                     i,
                     f'/html/body/ui-view[1]/div[3]/div/div[4]/div/ui-view/div/div/div[2]/ui-view[2]/ul/li[{i}]/div[2]/div[1]/a',  # product_name_xpath
                     [
@@ -113,8 +125,11 @@ class NaverSmartStoreBot:
                     [
                         f'/html/body/ui-view[1]/div[3]/div/div[4]/div/ui-view[2]/ul/li[{i}]/ncp-comment-reply/div/form/div/div[1]/span/button',  # upload_button_xpaths
                         f'/html/body/ui-view[1]/div[3]/div/div[4]/div/ui-view/div/div/div[2]/ui-view[2]/ul/li[{i}]/ncp-comment-reply/div/form/div/div[1]/span/button'
-                    ]
+                    ],
+                    comment_time_xpath  # New argument for comment time
                 )
+
+                report_data.append(comment_data)
                 any_unanswered = True
         return any_unanswered
 
@@ -128,7 +143,7 @@ class NaverSmartStoreBot:
             print(f"Error finding total reviews count: {e}")
             return 0
 
-    def process_reviews(self):
+    def process_reviews(self, report_data):
         self.scroll_down_page()
 
         consecutive_failures = 0
@@ -158,12 +173,20 @@ class NaverSmartStoreBot:
 
                 reply_button_xpath = '//button[contains(@class, "btn btn-xs btn-default progress-button progress-button-dir-horizontal progress-button-style-top-line") and @ng-if="!vm.data.reviewComment || !vm.data.reviewComment.commentId"]'
 
-                self.question_handler.handle_review(
+                review_data = self.question_handler.handle_review(
                     product_name_xpaths, review_xpaths, review_text_xpath, reply_textarea_xpath, reply_button_xpath
                 )
+                report_data.append(review_data)
 
                 consecutive_failures = 0  # Reset failure count upon successful processing
             except Exception as e:
+                error_data = {
+                    'timestamp': time.strftime("%Y-%m-%d %H:%M:%S"),
+                    'type': "Error",
+                    'row_index': j,
+                    'error_message': str(e)
+                }
+                report_data.append(error_data)
                 print(f"Error processing review at row {j}: {e}")
                 consecutive_failures += 1
                 continue  # Skip to next review if an error occurs
@@ -183,6 +206,7 @@ class NaverSmartStoreBot:
             if new_height == last_height:
                 break
             last_height = new_height
+
 
 if __name__ == "__main__":
     bot = NaverSmartStoreBot()
