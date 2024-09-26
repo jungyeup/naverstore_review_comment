@@ -4,6 +4,8 @@ import os
 import faiss
 from sentence_transformers import SentenceTransformer
 import numpy as np
+import ctypes
+from ocr_handler import OCRHandler
 
 class AnswerGenerator:
     def __init__(self, openai_api_key, data_folder='data'):
@@ -77,6 +79,7 @@ class AnswerGenerator:
         """
         self.model = SentenceTransformer('sentence-transformers/xlm-r-large-en-ko-nli-ststb')
         self.df = self.load_all_excel_files(data_folder)
+        self.ocr_handler = OCRHandler()
 
         # 디버그: 데이터 확인을 위해 상위 5개 데이터 출력
         print("데이터프레임 상위 데이터:\n", self.df.head())
@@ -131,10 +134,14 @@ class AnswerGenerator:
             print(f"유사한 질문 찾기 오류: {e}")
             return None, 0
 
-    def generate_answer(self, question, ocr_texts, product_name):
+    def generate_answer(self, question, ocr_summaries, product_name):
         try:
-            ocr_summary = " ".join(ocr_texts) if ocr_texts else "해당 제품에 대한 이미지에서 정보를 추출하지 않았습니다."
-            image_summary = self.get_image_summary(ocr_summary) if ocr_texts else ocr_summary
+            # Check if the question is important and show popup if needed
+            if self.check_if_important_question(question):
+                self.show_popup_and_wait(question)
+
+            # Use OCR summaries directly as provided
+            image_summary = ocr_summaries if ocr_summaries else "해당 제품에 대한 이미지에서 정보를 추출하지 않았습니다."
 
             similar_question_data, score = self.find_similar_question(question)
             if similar_question_data is None:
@@ -173,9 +180,55 @@ class AnswerGenerator:
             )
             answer = chat_completion.choices[0].message.content
             return answer
+        
         except Exception as e:
             print(f"답변 생성 오류: {e}")
             return "죄송합니다, 답변을 생성할 수 없습니다."
+
+    def check_if_important_question(self, question):
+        """
+        GPT-4o에게 질문이 특정 조건을 충족하는지 판단하게 합니다.
+        """
+        try:
+            check_prompt = f"""
+            다음 고객 문의가 아래 카테고리와 관련이 있는지 판단해 주세요.
+            - 택배관련 문의 
+            - 방문수령 문의
+            - 송장관련 문의
+            - 주소 변경
+            - 고객 이름 변경
+            - 받는 주소 변경
+            - 주문 취소
+            - 입고 관련
+            - 재입고 관련
+
+            고객 문의: {question}
+
+            반환 예시 (해당되는 경우): "해당합니다."
+            반환 예시 (해당되지 않는 경우): "해당하지 않습니다."
+            """
+
+            chat_completion = self.client.chat.completions.create(
+                model="gpt-4o",
+                temperature=0.8,
+                messages=[
+                    {"role": "system", "content": self.system_prompt},
+                    {"role": "user", "content": check_prompt}
+                ]
+            )
+            gpt_response = chat_completion.choices[0].message.content.strip()
+            return "해당합니다" in gpt_response
+        except Exception as e:
+            print(f"중요한 질문 판별 오류: {e}")
+            return False
+
+    def show_popup_and_wait(self, question):
+        """
+        중요한 질문일 경우 윈도우 팝업창을 띄워 알리고, 확인 버튼을 누를 때까지 대기합니다.
+        """
+        # MB_ICONINFORMATION (0x00000040L) | MB_OK (0x00000000L) | MB_TOPMOST (0x00040000L) | MB_SYSTEMMODAL (0x00001000L)
+        message_box_styles = 0x00000040 | 0x00000000 | 0x00040000 | 0x00001000
+        ctypes.windll.user32.MessageBoxW(0, f"중요한 고객 문의가 들어왔습니다:\n\n{question}", "중요한 문의 알림", message_box_styles)
 
     def revise_answer(self, user_input, original_answer):
         try:
@@ -199,35 +252,26 @@ class AnswerGenerator:
             print(f"답변 수정 오류: {e}")
             return original_answer
 
-    def get_image_summary(self, ocr_summary):
-        try:
-            image_info_prompt = f"""
-            다음 제품 정보를 요약합니다: ...(특히 숫자, 치수, 사이즈, 스펙 그리고 특징 등을 자세히 기록합니다)
-            추출된 텍스트: {ocr_summary}
-            """
-            chat_completion = self.client.chat.completions.create(
-                model="gpt-4o",
-                temperature=0.8,
-                messages=[
-                    {"role": "system", "content": self.system_prompt},
-                    {"role": "user", "content": image_info_prompt}
-                ]
-            )
-            return chat_completion.choices[0].message.content
-        except Exception as e:
-            print(f"이미지 요약 생성 오류: {e}")
-            return "이미지 요약을 생성할 수 없습니다."
-
     def classify_question(self, question):
         try:
             classification_prompt = f"""
             다음 고객 문의를 관련된 모든 카테고리로 분류해 주세요. 여러 카테고리가 관련된 경우 모두 표시해 주세요.
             카테고리 목록: [제품 리뷰, 재고/입고/배송, AS (수리, 반품, 교환), 사용법/호환성, 제품 문의, 할인 문의, 기술 지원, 기타 질문]
+            다음 고객 문의가 아래 상황 중 하나에 해당한다면 기타 질문으로 분류합니다.
+            - 택배관련 문의 
+            - 방문수령 문의
+            - 송장관련 문의
+            - 주소 변경
+            - 고객 이름 변경
+            - 받는 주소 변경
+            - 주문 취소
+            - 입고 관련
+            - 재입고 관련
             고객 문의: {question}
             """
             chat_completion = self.client.chat.completions.create(
                 model="gpt-4o",
-                temperature=0.8,
+                temperature=0.1,
                 messages=[
                     {"role": "system", "content": self.system_prompt},
                     {"role": "user", "content": classification_prompt}
@@ -263,25 +307,21 @@ class AnswerGenerator:
             "AS (수리, 반품, 교환)": """
             고객님께서 AS, 수리, 반품 또는 교환 절차에 대해 문의를 주셨습니다. 고객님의 불편을 최소화하기 위해 명확하고 자세한 절차를 안내해 주세요.
             AS에 괄호치거나 부가적 설명을 넣지 않습니다.
-            인터넷 주소를 두번적지 않습니다.
+            인터넷 주소를 두번 적지 않습니다.
             전화번호는 넣지 않습니다.
             금액을 절대 표기하지 않습니다.
             실제 제품의 크기는 최대 ±5 정도의 오차가 발생할 수 있습니다. 이는 제조 공정상의 특성으로 인한 것입니다.
-            ### A/S 비용 안내 시스템
-
-            금액을 절대 표기하지 않습니다.
-
+            
             카즈미 텐트의 폴대는 서비스가 가능합니다.
 
             필요한 부품을 구매해서 자가수리하는 방법과 AS센터에서 진행하는 방식이 있습니다.
 
-            가장 추천하는 방법: 자가수리의 경우 시간과 비용을 절감할수 있기 때문에 자가수리를 추천드리고 있습니다. as부품 구매와 수리 동영상은  아래의 URL에서 확인 가능하십니다.
+            가장 추천하는 방법: 자가수리의 경우 시간과 비용을 절감할 수 있기 때문에 자가수리를 추천드리고 있습니다. as부품 구매와 수리 동영상은 아래의 URL에서 확인 가능하십니다.
             https://www.kzmmall.com/category/as부품/110/
             자가 수리를 최대한 권유합니다.
 
-            AS센터를 통한 서비스 비용 안내와 접수는 아래 URL을 참고하시기 바랍니다. 텐트 수선비용은 수선 방법과 범위 따라 금액이 달라집니다. 아래 주소에서 예상 수리비용 확인이 가능하십니다.
+            AS센터를 통한 서비스 비용 안내와 접수는 아래 URL을 참고하시기 바랍니다. 텐트 수선비용은 수선 방법과 범위에 따라 금액이 달라집니다. 아래 주소에서 예상 수리비용 확인이 가능하십니다.
             https://support.kzmoutdoor.com/ 
-
             """,
             "사용법/호환성": """
             고객님께서 제품의 사용법 또는 다른 제품과의 호환성에 대해 문의를 주셨습니다. 제품의 사용 방법 및 호환 가능 여부를 상세하게 안내해 주세요.
@@ -291,18 +331,53 @@ class AnswerGenerator:
             정보가 정확히 기재가 돼 있지 않으면 근거를 찾아 계산하거나 산출하세요. 계산이나 산출이 안된다면 톡톡문의로 넘기세요.
             선물세트 라는 단어가 제품명에 포함돼 있으면 매장안내나 as안내를 하지 않습니다.
             제품에 관해서는 최대한 긍정적으로 좋게 설명합니다.
-            계산을 한다면 모든 수치에 대해서는 본제품과 작은 오차가 있을 수 있습니다. 라는 설명을 넣습니다.
+            계산을 한다면 모든 수치에 대해서는 본 제품과 작은 오차가 있을 수 있습니다. 라는 설명을 넣습니다.
             실제 제품의 크기는 최대 ±5 정도의 오차가 발생할 수 있습니다. 이는 제조 공정상의 특성으로 인한 것입니다.
             단종은 아니지만 재입고 날짜가 확정되지 않아 당분간은 구매가 어렵습니다.
+
+            식기세척기 사용 가능 제품 이름과 모델명:
+                에센셜 커틀러리세트, K24T3K02식기세트 22P, K22T3K07
+                캠핑 식기세트 17P, K22T3K06캠핑 식기세트 15P, K22T3K05
+                캠핑 식기세트 25P, K21T3K11웨스턴 커틀러리 세트, K22T3K01
+                트라이 커틀러리 세트, K9T3K004
+                쉐프 키친툴세트, K9T3K011
+                더블 머그컵 6Pset, K4T3K004
+                에그 텀블러 2P, K9T3K010
+                프리미엄 STS 푸드 플레이트, K20T3K003프리미엄 코펠세트 XL, K8T3K003
+                프리미엄 코펠세트 L, K8T3K002
+                프리미엄 STS 패밀리 캠핑 식기세트, K20T3K002
+                프리미엄 STS 식기세트 커플, K20T3K001
+
+            식기세척기 사용 불가능한 제품 이름과 모델명:
+                이그니스 디자인 팟 그리들 X 얼, K24T3K05이그니스 디자인 그리들 (얼),  K23T3G03
+                필드 크레프트 시에라컵 2Pset, K23T3K05GR / K23T3K05BK
+                와일드 필드 캠핑컵 8P, K23T3K03
+                NEW 블랙 머그 5Pset, K21T3K03웨이브 콜드컵 2Pset, K8T3K007RD
+                필드 650 텀블러, K23T3K06
+                트윈 우드 커틀러리세트, K21T3K10
+                스텐레스 캠핑 주전자 0.8L, K21T3K08 
+
+            - 식기세척기 사용 주의 문구 내용
+                식기 세척기 사용 시 코팅(가공)된 제품의 경우 제품 손상 및 변형이 발생할 수 있어 권장하지 않습니다. 
+                이는 불량 사유에 해당하지 않으므로, 무상 교환 처리 진행이 불가능합니다. 
+                All 스테인리스 제품의 경우 식기 세척기 사용이 가능하나, 
+                코팅 또는 나무, 플라스틱 등 재질이 추가된 경우 식기 세척기 사용 시 
+                상기 사용 주의 문구 내용처럼 제품의 손상 및 변형이 발생할 수 있습니다.
             """,
             "할인 문의": """
-            고객님께서 제품 할인에 대한 문의를 주셨습니다. 현재 진행중인 할인 정보 및 적용 조건을 안내해 주세요.
+            고객님께서 제품 할인에 대한 문의를 주셨습니다. 현재 진행 중인 할인 정보 및 적용 조건을 안내해 주세요.
             """,
             "기술 지원": """
             고객님께서 기술 지원에 대해 문의하셨습니다. 가능한 신속하고 정확한 기술 지원을 제공해 주세요.
             """,
             "기타 질문": """
-            고객님께서 기타 문의를 주셨습니다. 가능한 한 명확하고 유용한 답변을 제공해 주세요.
+            고객님께서 기타 문의를 주셨습니다. 질문의 의도를 다시 한번 파악하고 질문과 상황에 맞는 답변을 생성해주세요.
+            모른다거나 확인이 필요하다 라는 답변을 하지 않습니다.
+            추가정보를 요구하지 않습니다.
+            주문가능하거나 주문된 제품의 재고는 항상 있습니다.
+            단종은 아니지만 재입고 날짜가 확정되지 않아 당분간은 구매가 어렵습니다.
+            오후1시 이전 주문건은 당일출고가 됩니다.
+            오후1시 이후 주문건은 익일출고가 됩니다.
             """
         }
         prompt = "\n".join([category_prompts[cat] for cat in categories])

@@ -26,10 +26,10 @@ class QuestionHandler:
             try:
                 label = self.driver.find_element(By.XPATH, label_xpath)
                 label_text = label.text.strip()
-                if label_text == "답변완료":
+                if label_text == "미답변":
                     print(f"Question {i} is unanswered.")
                     return True
-                elif label_text == "미답변":
+                elif label_text == "답변완료":
                     print(f"Question {i} is already answered.")
                     return False
                 else:
@@ -41,31 +41,53 @@ class QuestionHandler:
                 print(f"Error checking unanswered status for question {i} with XPath {label_xpath}: {e}")
         return False
 
+    def scroll_down_fully(self, increment=1000, pause_time=1):
+        """Scroll down the webpage incrementally to ensure all content is loaded."""
+        # Initial height of the document
+        last_height = self.driver.execute_script("return document.body.scrollHeight")
+        
+        while True:
+            # Scroll down by increment
+            self.driver.execute_script(f"window.scrollBy(0, {increment});")
+            # Wait to allow images to load
+            time.sleep(pause_time)
+            # Calculate new document height
+            new_height = self.driver.execute_script("return document.body.scrollHeight")
+            
+            # Check if the document height has changed
+            if new_height == last_height:
+                # If height hasn't changed, we have reached the bottom
+                break
+            
+            # Update last height to new height
+            last_height = new_height
+
+        while True:
+            self.driver.execute_script(f"window.scrollBy(0, {increment});")
+            time.sleep(pause_time)
+
+            WebDriverWait(self.driver, 10).until(
+                lambda driver: driver.execute_script("return document.readyState") == "complete"
+            )
+
+            new_height = self.driver.execute_script("return document.body.scrollHeight")
+
+            if new_height == last_height:
+                break
+            last_height = new_height
+
     def extract_and_ocr_images(self):
         try:
-            def scroll_to_bottom_slowly(increment=500):
-                scroll_pause_time = 2
+            def collect_ocr_summaries():
+                self.scroll_down_fully()
                 ocr_summaries = []
-                last_height = self.driver.execute_script("return document.body.scrollHeight")
-
-                while True:
-                    self.driver.execute_script(f"window.scrollBy(0, {increment});")
-                    time.sleep(scroll_pause_time)
-                    html_content = self.driver.page_source
-
-                    summarized_text = self.ocr_handler.ocr_from_html_content(html_content)
-                    ocr_summaries.append(summarized_text)
-
-                    new_height = self.driver.execute_script("return document.body.scrollHeight")
-                    if new_height == last_height:
-                        break
-
-                    last_height = new_height
-                    time.sleep(1)
-
+                
+                html_content = self.driver.page_source
+                ocr_summaries = self.ocr_handler.ocr_from_html_content(html_content)
+                
                 return ocr_summaries
 
-            return scroll_to_bottom_slowly()
+            return collect_ocr_summaries()
         except Exception as e:
             print(f"Error scrolling and collecting OCR summaries: {e}")
             return ["Failed to collect OCR summaries"]
@@ -95,33 +117,20 @@ class QuestionHandler:
             print(f"Error checking or closing popup: {e}")
             return False
 
-    def scroll_down(self, increment=500, pause_time=2):
-        last_height = self.driver.execute_script("return document.body.scrollHeight")
-
-        while True:
-            self.driver.execute_script(f"window.scrollBy(0, {increment});")
-            time.sleep(pause_time)
-            new_height = self.driver.execute_script("return document.body.scrollHeight")
-            if new_height == last_height:
-                break
-            last_height = new_height
-
     def get_ocr_summaries_for_product(self, product_name):
-        # Load existing data if any
         if not self.df.empty:
             existing_entry = self.df[self.df['상품명'] == product_name]
             if not existing_entry.empty:
                 ocr_summaries = existing_entry.iloc[0]['OCR내용']
                 print(f"Using existing OCR summaries for product: {product_name}")
                 try:
-                    return ast.literal_eval(ocr_summaries)  # Safely convert string back to list
+                    return ast.literal_eval(ocr_summaries)
                 except Exception as e:
                     print(f"Error parsing OCR summaries for product: {product_name}. Details: {e}")
                     return []
 
         print("No existing data found in the Excel file.")
 
-        # If OCR summaries for the product are not found, perform OCR extraction
         ocr_summaries = self.extract_and_ocr_images()
         if 'Failed to collect OCR summaries' in ocr_summaries:
             print(f"Could not collect OCR summaries for product: {product_name}")
@@ -153,10 +162,13 @@ class QuestionHandler:
 
             scroll_button_xpaths = [
                 '//button[text()="상세정보 펼쳐보기"]',
-                '//button[@class="_1gG8JHE9Zc _nlog_click"][@data-shp-page-key="100329229"][@data-shp-area="detailitm.more"]'
+                '//button[@class="_1gG8JHE9Zc _nlog_click"][@data-shp-page-key="100329229"][@data-shp-area="detailitm.more"]',
+                '//button[@class="_1gG8JHE9Zc _nlog_click" and @data-shp-page-key="100356693" and @data-shp-area="detailitm.more"]'
             ]
 
             try:
+                self.scroll_down_fully()  # Scroll down the page fully before trying to find the scroll button
+
                 scroll_button = None
                 for xpath in scroll_button_xpaths:
                     try:
@@ -165,6 +177,15 @@ class QuestionHandler:
                             self.driver.execute_script("arguments[0].scrollIntoView(true);", scroll_button)
                             time.sleep(1)
                             scroll_button.click()
+                            time.sleep(1)
+                            self.scroll_down_fully()
+                            self.scroll_down_fully()
+
+                            # Ensure the page is fully loaded before next click
+                            WebDriverWait(self.driver, 10).until(
+                                lambda driver: driver.execute_script("return document.readyState") == "complete"
+                            )
+
                             break
                     except Exception as e:
                         continue
@@ -174,10 +195,10 @@ class QuestionHandler:
             except Exception as e:
                 print(f"Scroll button processing error: {e}")
 
-            # Get OCR summaries for the product
             ocr_summaries = self.get_ocr_summaries_for_product(product_name)
 
             print(f"Extracted OCR summaries: {ocr_summaries}")
+
 
             answer = self.answer_generator.generate_answer(question, ocr_summaries, product_name)
             modification_note = "자동 생성된 답변"
@@ -191,7 +212,7 @@ class QuestionHandler:
                 modification_note = "유사한 질문에 대한 답변으로 대체됨"
 
             original_answer = answer
-            print("Generated Answer:", original_answer)
+            print("\n\nGenerated Answer:", original_answer)
 
             self.beep_sound()
 
@@ -256,13 +277,12 @@ class QuestionHandler:
                 except Exception as e:
                     print(f"Could not find upload button with XPath {xpath}: {e}")
 
-            # Include OCR summaries in the DataFrame entry
             new_entry = pd.DataFrame({
                 "상품명": [product_name],
                 "문의내용": [question],
                 "답변내용": [answer],
                 "수정내용": [modification_note],
-                "OCR내용": [str(ocr_summaries)]  # Store OCR summaries as a string
+                "OCR내용": [str(ocr_summaries)]
             })
             self.df = pd.concat([self.df, new_entry], ignore_index=True)
             self.save_to_excel()
@@ -287,7 +307,7 @@ class QuestionHandler:
 
     def handle_review(self, product_name_xpaths, review_xpaths, review_text_xpath, reply_textarea_xpath, reply_button_xpath):
         try:
-            self.scroll_down()
+            self.scroll_down_fully()
 
             product_name_element = None
             for product_name_xpath in product_name_xpaths:
@@ -329,7 +349,6 @@ class QuestionHandler:
 
             print(f"Review text: {review_text}")
 
-            # Check if reply button is available before generating an answer
             try:
                 reply_button = self.driver.find_element(By.XPATH, reply_button_xpath)
             except NoSuchElementException:
@@ -337,7 +356,6 @@ class QuestionHandler:
                 self.driver.find_element(By.XPATH, '//button[@type="button" and @class="close" and @data-dismiss="modal" and @ng-click="vm.func.closeModal()" and @aria-label="닫기"]/span[@aria-hidden="true"]').click()
                 return
 
-            # Get OCR summaries for the product review
             ocr_summaries = self.get_ocr_summaries_for_product(product_name)
             
             answer = self.answer_generator.generate_answer(review_text, ocr_summaries, product_name)
