@@ -14,14 +14,14 @@ class QuestionHandler:
         self.ocr_handler = ocr_handler
         self.answer_generator = answer_generator
         self.excel_file_path = "data/questions_answers.xlsx"
-        self.df = pd.read_excel(self.excel_file_path) if os.path.exists(self.excel_file_path) else pd.DataFrame(columns=["상품명", "문의내용", "답변내용", "수정내용", "OCR내용"])
-    
+        self.df = pd.read_excel(self.excel_file_path) if os.path.exists(self.excel_file_path) else pd.DataFrame(columns=["작성시간","상품명", "문의내용", "답변내용", "수정내용", "OCR내용"])
+
     def is_unanswered(self, i):
         label_xpaths = [
             f'/html/body/ui-view[1]/div[3]/div/div[4]/div/ui-view/div/div/div[2]/ui-view[2]/ul/li[{i}]/div[2]/div[1]/span[1]',
             f'/html/body/ui-view[1]/div[3]/div/div[4]/div/ui-view[2]/ul/li[{i}]/div[2]/div[1]/span[1]'
         ]
-        
+
         for label_xpath in label_xpaths:
             try:
                 label = self.driver.find_element(By.XPATH, label_xpath)
@@ -45,7 +45,7 @@ class QuestionHandler:
         """Scroll down the webpage incrementally to ensure all content is loaded."""
         # Initial height of the document
         last_height = self.driver.execute_script("return document.body.scrollHeight")
-        
+
         while True:
             # Scroll down by increment
             self.driver.execute_script(f"window.scrollBy(0, {increment});")
@@ -53,12 +53,12 @@ class QuestionHandler:
             time.sleep(pause_time)
             # Calculate new document height
             new_height = self.driver.execute_script("return document.body.scrollHeight")
-            
+
             # Check if the document height has changed
             if new_height == last_height:
                 # If height hasn't changed, we have reached the bottom
                 break
-            
+
             # Update last height to new height
             last_height = new_height
 
@@ -81,10 +81,10 @@ class QuestionHandler:
             def collect_ocr_summaries():
                 self.scroll_down_fully()
                 ocr_summaries = []
-                
+
                 html_content = self.driver.page_source
                 ocr_summaries = self.ocr_handler.ocr_from_html_content(html_content)
-                
+
                 return ocr_summaries
 
             return collect_ocr_summaries()
@@ -182,7 +182,6 @@ class QuestionHandler:
                             scroll_button.click()
                             time.sleep(1)
                             self.scroll_down_fully()
-                            self.scroll_down_fully()
 
                             # Ensure the page is fully loaded before next click
                             WebDriverWait(self.driver, 10).until(
@@ -192,7 +191,7 @@ class QuestionHandler:
                             break
                     except Exception as e:
                         continue
-                
+
                 if not scroll_button:
                     print("Scroll button not found or not clickable with provided XPaths.")
             except Exception as e:
@@ -256,7 +255,7 @@ class QuestionHandler:
                     continue
                 except Exception as e:
                     print(f"Could not click answer button with XPath {xpath}: {e}")
-
+            time.sleep(1)
             typing_area = None
             for xpath in typing_area_xpaths:
                 try:
@@ -267,7 +266,7 @@ class QuestionHandler:
                     continue
                 except Exception as e:
                     print(f"Could not find typing area with XPath {xpath}: {e}")
-
+            time.sleep(1)
             for xpath in upload_button_xpaths:
                 try:
                     upload_button = self.driver.find_element(By.XPATH, xpath)
@@ -282,6 +281,7 @@ class QuestionHandler:
                     print(f"Could not find upload button with XPath {xpath}: {e}")
 
             new_entry = pd.DataFrame({
+                "작성시간": [current_time],
                 "상품명": [product_name],
                 "문의내용": [question],
                 "답변내용": [answer],
@@ -291,10 +291,33 @@ class QuestionHandler:
             self.df = pd.concat([self.df, new_entry], ignore_index=True)
             self.save_to_excel()
 
+            # Report data for external report generator
+            report_data = {
+                'type': 'Comment',
+                'timestamp': current_time,
+                'product_name': product_name,
+                'question': question,
+                'answer': answer,
+                'ocr_summaries': str(ocr_summaries),
+                'status': 'Uploaded'
+            }
+            return report_data
+
         except Exception as e:
             print(f"Error answering question {i}: {e}")
             self.driver.back()
             time.sleep(2)
+            current_time = time.strftime("%Y-%m-%d %H:%M:%S")
+            return {
+                'type': 'Comment',
+                'timestamp': current_time,
+                'product_name': 'N/A',
+                'question': f"Error processing question {i}",
+                'answer': 'N/A',
+                'ocr_summaries': 'N/A',
+                'status': 'Error',
+                'error_message': str(e)
+            }
 
     def beep_sound(self):
         if platform.system() == "Windows":
@@ -361,7 +384,7 @@ class QuestionHandler:
                 return
 
             ocr_summaries = self.get_ocr_summaries_for_product(product_name)
-            
+
             answer = self.answer_generator.generate_answer(review_text, ocr_summaries, product_name)
             modification_note = "자동 생성된 답글"
 
@@ -400,14 +423,33 @@ class QuestionHandler:
                 print("Reply button not found. This review might already have a reply.")
                 self.driver.find_element(By.XPATH, '//button[@type="button" and @class="close" and @data-dismiss="modal" and @ng-click="vm.func.closeModal()" and @aria-label="닫기"]/span[@aria-hidden="true"]').click()
                 return
-            
+
             self.dismiss_popup()
 
             print(f"Replied to review with text: {answer}")
 
+            report_data = {
+                'type': 'Review',
+                'timestamp': time.strftime("%Y-%m-%d %H:%M:%S"),
+                'product_name': product_name,
+                'question': review_text,
+                'answer': answer,
+                'ocr_summaries': str(ocr_summaries),
+                'status': 'Uploaded'
+            }
+            return report_data
+        
         except Exception as e:
             print(f"Error handling review: {e}")
-            try:
-                self.driver.find_element(By.XPATH, '//button[@type="button" and @class="close" and @data-dismiss="modal" and @ng-click="vm.func.closeModal()" and @aria-label="닫기"]/span[@aria-hidden="true"]').click()
-            except Exception as e:
-                print(f"Error closing modal after handling review failure: {e}")
+            self.driver.find_element(By.XPATH, '//button[@type="button" and @class="close" and @data-dismiss="modal" and @ng-click="vm.func.closeModal()" and @aria-label="닫기"]/span[@aria-hidden="true"]').click()
+            current_time = time.strftime("%Y-%m-%d %H:%M:%S")
+            return {
+                'type': 'Review',
+                'timestamp': current_time,
+                'product_name': 'N/A',
+                'question': f"Error processing review",
+                'answer': 'N/A',
+                'ocr_summaries': 'N/A',
+                'status': 'Error',
+                'error_message': str(e)
+            }

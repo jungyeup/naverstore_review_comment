@@ -136,7 +136,7 @@ class AnswerGenerator:
             print(f"유사한 질문 찾기 오류: {e}")
             return None, 0
 
-    def generate_answer(self, question, ocr_summaries, product_name, comment_time, current_time):
+    def generate_answer(self, question, ocr_summaries, product_name, comment_time=None, current_time=None):
         try:
             if self.check_if_important_question(question):
                 self.show_popup_and_wait(question)
@@ -165,8 +165,16 @@ class AnswerGenerator:
             제공된 제품 정보 및 유사 질문 답변을 바탕으로 다음 문의에 답변해 주세요. 제품명과 고객질문을 언급하지 말아주세요.
             제품명: {product_name}
             고객 질문: {question}
-            질문 시간: {comment_time} 
-            현재 시간: {current_time}
+            """
+
+            # Append times if provided
+            if comment_time and current_time:
+                answer_prompt += f"""
+                질문 시간: {comment_time} 
+                현재 시간: {current_time}
+                """
+
+            answer_prompt += f"""
             {similar_question_prompt}
             제품 정보: {image_summary}
             {specific_prompt}
