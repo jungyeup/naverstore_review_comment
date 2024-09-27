@@ -30,7 +30,7 @@ warnings.filterwarnings('ignore', category=UserWarning, module='torch.nn.functio
 
 # Huggingface 토크나이저 설정
 model_name_or_path = "bert-base-uncased"  # 정확한 모델 이름 또는 경로
-token = "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"  # 필요시 Huggingface 토큰
+token = ""  # 필요시 Huggingface 토큰
 
 try:
     tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, clean_up_tokenization_spaces=True, token=token)
