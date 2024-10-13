@@ -30,7 +30,7 @@ warnings.filterwarnings('ignore', category=UserWarning, module='torch.nn.functio
 
 # Configure Huggingface tokenizer
 model_name_or_path = "bert-base-uncased"
-token = "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"  # Update with your actual token if needed
+token = ""  # Update with your actual token if needed
 
 try:
     tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, clean_up_tokenization_spaces=True, token=token)
