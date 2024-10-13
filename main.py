@@ -20,26 +20,26 @@ from report_generator import ReportGenerator
 from transformers import AutoTokenizer
 import tensorflow as tf
 
-# 환경 변수 설정
+# Configure environment variables
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 
-# 경고 메시지 무시 설정
+# Ignore warnings
 warnings.filterwarnings('ignore', category=FutureWarning, module='transformers.tokenization_utils_base')
 warnings.filterwarnings('ignore', category=UserWarning, module='tensorflow')
 warnings.filterwarnings('ignore', category=UserWarning, module='torch.nn.functional')
 
-# Huggingface 토크나이저 설정
-model_name_or_path = "bert-base-uncased"  # 정확한 모델 이름 또는 경로
-token = ""  # 필요시 Huggingface 토큰
+# Configure Huggingface tokenizer
+model_name_or_path = "bert-base-uncased"
+token = "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"  # Update with your actual token if needed
 
 try:
     tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, clean_up_tokenization_spaces=True, token=token)
 except OSError as e:
     print(f"Error loading model {model_name_or_path}: {str(e)}")
 
-# 예시 TensorFlow 코드
-labels = [0, 1, 1, 0]  # 예시 labels 데이터
-predictions = [[0.9, 0.1], [0.2, 0.8], [0.3, 0.7], [0.8, 0.2]]  # 예시 predictions 데이터
+# Example TensorFlow code
+labels = [0, 1, 1, 0]  # Example labels data
+predictions = [[0.9, 0.1], [0.2, 0.8], [0.3, 0.7], [0.8, 0.2]]  # Example predictions data
 
 # Updated API usage
 try:
@@ -49,6 +49,7 @@ try:
     print("Loss computed successfully:", loss)
 except Exception as e:
     print(f"Error computing loss: {str(e)}")
+
 
 class NaverSmartStoreBot:
     def __init__(self):
@@ -71,8 +72,8 @@ class NaverSmartStoreBot:
         self.ocr_handler = OCRHandler()
         data_folder = os.path.join(os.getcwd(), 'data')
         self.answer_generator = AnswerGenerator(self.config['OPENAI_API_KEY'], data_folder=data_folder)
-        self.question_handler = QuestionHandler(self.driver, self.ocr_handler, self.answer_generator)
         self.report_generator = ReportGenerator(self.config['OPENAI_API_KEY'])
+        self.question_handler = QuestionHandler(self.driver, self.ocr_handler, self.answer_generator, self.report_generator)
         self.daily_report_data = []
 
     def run(self):
@@ -106,6 +107,8 @@ class NaverSmartStoreBot:
         while True:
             try:
                 unanswered_comments_exist = self.process_comments(self.daily_report_data)
+                print(f"Collected comment data: {self.daily_report_data}")  # Debug statement
+
                 if not unanswered_comments_exist:
                     self.driver.get(review_url)
                     self.process_reviews(self.daily_report_data)
@@ -124,13 +127,13 @@ class NaverSmartStoreBot:
 
     def save_daily_report(self):
         current_date = datetime.now().strftime('%Y-%m-%d')
-        if os.path.exists(f"history/Daily_Report_{current_date}.docx") or os.path.exists(f"history/Daily_Report_{current_date}.xlsx"):
-            self.report_generator.generate_docx_report(self.daily_report_data, f"history/Daily_Report_{current_date}.docx", append=True)
-            self.report_generator.generate_xlsx_report(self.daily_report_data, f"history/Daily_Report_{current_date}.xlsx", append=True)
-        else:
-            self.report_generator.generate_docx_report(self.daily_report_data, f"history/Daily_Report_{current_date}.docx")
-            self.report_generator.generate_xlsx_report(self.daily_report_data, f"history/Daily_Report_{current_date}.xlsx")
-        # Clear the daily report data after saving
+        docx_file_path = f"history/Daily_Report_{current_date}.docx"
+        xlsx_file_path = f"history/Daily_Report_{current_date}.xlsx"
+
+        self.report_generator.generate_docx_report(self.daily_report_data, docx_file_path)
+        self.report_generator.generate_xlsx_report(self.daily_report_data, xlsx_file_path)
+
+        print(f"Report data before clearing: {self.daily_report_data}")  # Debug statement
         self.daily_report_data.clear()
 
     def process_comments(self, report_data):
@@ -166,7 +169,8 @@ class NaverSmartStoreBot:
                     ],
                     comment_time_xpath  # New argument for comment time
                 )
-                report_data.append(comment_data)
+                if comment_data:  # Ensure comment_data is not None
+                    report_data.append(comment_data)
                 self.save_daily_report()  # Save the report after each answer
                 any_unanswered = True
         return any_unanswered
@@ -195,16 +199,17 @@ class NaverSmartStoreBot:
                 return
 
             try:
-                product_name_xpaths = [f'//div[@row-index="{j}"]//div[@col-id="productName"]/span/a']
-                review_xpaths = [f'//div[@row-index="{j}"]//div[@col-id="reviewContent"]/span/a']
-                review_text_xpath = f'//div[@row-index="{j}"]//div[@col-id="reviewContent"]/span/a/div'
+                product_name_xpaths = [f'//div[@row-index="{j}"]/div[@col-id="productName"]/span/a']
+                review_xpaths = [f'//div[@row-index="{j}"]/div[@col-id="reviewContent"]/span/a']
+                review_text_xpath = f'//div[@row-index="{j}"]/div[@col-id="reviewContent"]/span/a/div'
                 reply_textarea_xpath = '//textarea[@placeholder="반복적인 답글이 아닌 정성스러운 답글을 남겨주세요. 낮은 평점의 리뷰에도 귀 기울여 진심을 담아 구매자와 소통해주시면 스토어 만족도가 높아집니다.^^"]'
                 reply_button_xpath = '//button[contains(@class, "btn btn-xs btn-default progress-button progress-button-dir-horizontal progress-button-style-top-line") and @ng-if="!vm.data.reviewComment || !vm.data.reviewComment.commentId"]'
 
                 review_data = self.question_handler.handle_review(
                     product_name_xpaths, review_xpaths, review_text_xpath, reply_textarea_xpath, reply_button_xpath
                 )
-                report_data.append(review_data)
+                if review_data:  # Ensure review_data is not None
+                    report_data.append(review_data)
                 self.save_daily_report()  # Save the report after each review process
                 consecutive_failures = 0
             except Exception as e:
@@ -230,6 +235,7 @@ class NaverSmartStoreBot:
             if new_height == last_height:
                 break
             last_height = new_height
+
 
 if __name__ == "__main__":
     bot = NaverSmartStoreBot()

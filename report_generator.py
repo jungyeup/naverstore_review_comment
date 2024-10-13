@@ -17,7 +17,7 @@ class ReportGenerator:
         # Initialize OpenAI client
         self.client = OpenAI(api_key=openai_api_key)
         # Define the system prompt with some base instructions for the GPT model if needed
-        self.system_prompt = "한국어로작성해줘"
+        self.system_prompt = "You are a helpful assistant."
 
     def generate_gpt4_summary(self, interaction_data):
         """
@@ -42,11 +42,13 @@ class ReportGenerator:
             logging.error(f"Error generating summary: {e}")
             return f"Error generating summary: {e}"
 
-    def generate_docx_report(self, data, file_path, append=False):
-        if append and os.path.exists(file_path):
+    def generate_docx_report(self, data, file_path):
+        doc = Document()
+        
+        # Try to load existing data if the file exists
+        if os.path.exists(file_path):
             doc = Document(file_path)
         else:
-            doc = Document()
             doc.add_heading('Daily Report', 0)
 
         for record in data:
@@ -70,13 +72,16 @@ class ReportGenerator:
         doc.save(file_path)
         logging.info(f"Report saved as .docx at {file_path}")
 
-    def generate_xlsx_report(self, data, file_path, append=False):
-        if append and os.path.exists(file_path):
+    def generate_xlsx_report(self, data, file_path):
+        df_new = pd.DataFrame(data)
+        
+        # Try to load existing data if the file exists
+        if os.path.exists(file_path):
             df_existing = pd.read_excel(file_path)
-            df_new = pd.DataFrame(data)
             df = pd.concat([df_existing, df_new], ignore_index=True)
         else:
-            df = pd.DataFrame(data)
+            df = df_new
+        
         df.to_excel(file_path, index=False)
         logging.info(f"Report saved as .xlsx at {file_path}")
 

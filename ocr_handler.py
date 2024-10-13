@@ -75,7 +75,7 @@ class OCRHandler:
             
             # Enhance contrast
             enhancer = ImageEnhance.Contrast(img)
-            enhanced_img = enhancer.enhance(2)
+            enhanced_img = enhancer.enhance(4)
 
             # Convert to numpy array
             enhanced_img_np = np.array(enhanced_img)
@@ -223,6 +223,7 @@ class OCRHandler:
             return summaries
         except Exception as e:
             summaries.append({'summary': f"Error in generating OCR summary: {e}"})
+            print(summaries)
             return summaries
 
     @staticmethod

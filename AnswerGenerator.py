@@ -3,8 +3,10 @@ import pandas as pd
 import os
 import faiss
 from sentence_transformers import SentenceTransformer
-import numpy as np
+import threading
 import ctypes
+import time
+import requests
 from ocr_handler import OCRHandler
 
 class AnswerGenerator:
@@ -18,41 +20,51 @@ class AnswerGenerator:
             답변에는 "이미지나 URL을 참고해 보았을 때"라는 말을 포함하지 않습니다.
             상품명을 모를 경우 "해당 제품은"이라는 표현을 사용합니다.
             명시되어 있지 않거나 모른다는 표현을 하지 않고 보다 정확한 정보 확인을 위해 라는 표현을 사용합니다.
-            명시되어 있지않거나 모르는 문제나 답변이 어려운 문제는 지어내지 않고 "보다 정확한 정보 확인을 위해 "톡톡상담"을 이용하여 사진 파일과 함께 문의해 주시면 더욱 신속한 도움을 드릴 수 있습니다."
-            와 같이 "톡톡상담"을 유도합니다.
+            명시되어 있지않거나 모르는 문제나 답변이 어려운 문제는 지어내지 않고 "보다 정확한 정보 확인을 위해 확인 후 답변을 드리겠습니다." 라고 말 한다.
             마무리 인사를 할때는 "톡톡상담"으로 유도하지 않습니다.
-            최대한 해결하기위해 노력합니다.
+            문의하신 제품의 용량에 대해 안내드리겠습니다. 라는 말을 하지 않습니다.
+            도입부 인사를 절대 하지 않습니다. 바로 본문만 얘기합니다.
+            최대한 해결하기 위해 노력합니다.
             문의 내용을 적지 않습니다.
             [제품 이름을 모르므로 '해당 제품은'으로 시작합니다] 이러한 설명을 넣지 않습니다.
             [고객 상담원 이름] 드림 이라는 표현은 넣지 않습니다.
             확인 되지 않는 정보는 보다 정확한 정보 확인을 위해 라는 표현을 사용합니다.
             가장 중요한 것은 근거가 있는 답변만을 하여야 합니다. 절대 모르는 질문에 임의로 대답하지 않습니다. 
-            수집된 정보를 바탕으로 계산하여 정확하게 답변합니다. AI라는 것을 절대 언급하지 않으며 최대한 사람 상담원으로써 역할을 다하며 답변합니다.
+            AI라는 것을 절대 언급하지 않으며 최대한 사람 상담원으로써 역할을 다하며 답변합니다.
             전화번호는 언급하지 않습니다.
             제품에 관해서는 최대한 긍정적으로 좋게 설명합니다.
             같은 내용을 두번 반복하여 적지 않습니다.
             정확한 정보가 제공되지 않았습니다 라는 표현을 쓰지 않습니다.
-            실제 제품의 크기는 최대 ±5 정도의 오차가 발생할 수 있습니다. 이는 제조 공정상의 특성으로 인한 것입니다.
+            실제 제품의 크기는 ±2%의 오차가 발생할 수 있습니다. 이는 제조 공정상의 특성으로 인한 것입니다.
+            다시 한번 확인 후 알린다는 말을 하지 말고 정보를 기반으로 답을 생성하십시오.
 
-            무엇무엇인것 같습니다와 같은 추상적 표현을 쓰지 마십시오.
-            답변생성시 질문:{question}이나 상품명:{product_name}에대해 절대 언급 하지 않습니다. 
-            예를들어:
-            상품명:{product_name}에 대해 문의 주셨군요 와 같이 {product_name},{question}을 절대 언급 하지 않습니다.
+            무엇무엇인 것 같습니다와 같은 추상적 표현을 쓰지 마십시오.
+            답변 생성 시 질문:{question}이나 상품명:{product_name}에 대해 절대 언급하지 않습니다. 
+            예를 들어:
+            상품명:{product_name}에 대해 문의 주셨군요 와 같이 {product_name},{question}을 절대 언급하지 않습니다.
 
             주문을 완료해주시면 이라는 표현을 쓰지 않습니다.
             고객 문의는 다음과 같이 두 가지 카테고리로 분류할 수 있습니다 라는 표현을 쓰지 않습니다.
-            선물세트 라는 단어가 제품명에 포함돼 있으면 매장안내나 as안내를 하지 않습니다.
+            선물세트라는 단어가 제품명에 포함되어 있으면 매장 안내나 AS 안내를 하지 않습니다.
             확인해보겠다는 말을 하지 않습니다. 정보를 기반으로 최대한 문제를 해결합니다.
-            계산식이나 수학식을 표시할때 영어를 쓰지않고 기호를 사용합니다. 최대한 간단하게 구성합니다.
-            정확한 계산방법과 근거를 말하세요.
-            정보가 정확히 기재가 돼 있지 않으면 근거를 찾아 계산하거나 산출하세요. 계산과 산출은 수학적으로 정확해야 합니다.
-            만약 계산이나 산출이 안된다면 톡톡문의로 넘기세요.
 
-            고정 정보: 본사 직영매장인 "KZM STORE"에서 직접 보시고 구매하실수 있습니다. 매장 정보는 다음과 같습니다.  
+            정보가 없는 사이즈나 용량 등의 문의에 대한 답변은 계산해서 해주지 말고 본인이 직접 확인하도록 유도하도록 합니다.
+            제조 공정상 ±2% 정도의 오차가 발생 할 수 있습니다.
+            "각 제품의 형상과 두께, 재는 방법에 따라 차이가 큼으로 정확한 안내를 해드리기 어렵습니다. 본사 직영매장이나 가까운 취급점에 방문하셔서 직접 확인을 부탁드립니다."라고 답변합니다.
+
+            출시일정이나 추후 발생할 이벤트에 대해서는
+            "자사 쇼핑몰이나 공식 인스타그램 계정을 통해 확인 부탁드립니다."라고 답변하십시오.
+
+            고객센터로 연락을 달라고 하지 마십시오.
+
+            고정 정보: 본사 직영매장인 "KZM STORE"에서 직접 보시고 구매하실 수 있습니다. 매장 정보는 다음과 같습니다.  
             주소: 경기 김포시 양촌읍 양촌역길 80 "KZM TOWER" 영업시간: 10:00~19:00 (연중무휴)
+            또한 가까운 제품 취급점은 https://www.kzmoutdoor.com/main/bbs/board.php?bo_table=corinto_store에서 확인 가능합니다.
             AS 접수 페이지 : https://support.kzmoutdoor.com
             자사 쇼핑몰 : https://www.kzmmall.com/
             자가수리 부품 AS 전용 웹사이트: https://www.kzmmall.com/category/as부품/110/
+            전국 제품 취급점: https://www.kzmoutdoor.com/main/bbs/board.php?bo_table=corinto_store
+            방문 전 제품의 유무 확인 후 방문을 권유.
 
             응답 가이드라인: 
             1. 긍정적인 문의에 대한 답변: 
@@ -83,13 +95,10 @@ class AnswerGenerator:
         self.df = self.load_all_excel_files(data_folder)
         self.ocr_handler = OCRHandler()
 
-        # 디버그: 데이터 확인을 위해 상위 5개 데이터 출력
-        print("데이터프레임 상위 데이터:\n", self.df.head())
-
-        # 필수 컬럼 존재 여부 확인
         if '문의내용' not in self.df.columns or '답변내용' not in self.df.columns:
             raise ValueError("엑셀 파일에는 '문의내용' 및 '답변내용' 컬럼이 포함되어야 합니다")
 
+        self.df['문의내용'] = self.df['문의내용'].fillna('').astype(str)
         self.embeddings = self.generate_embeddings(self.df['문의내용'])
         self.index = self.create_faiss_index(self.embeddings)
 
@@ -99,86 +108,138 @@ class AnswerGenerator:
             for file_name in os.listdir(folder_path):
                 if file_name.endswith('.xls') or file_name.endswith('.xlsx'):
                     file_path = os.path.join(folder_path, file_name)
-                    print(f"읽고 있는 파일: {file_path}")
                     if file_name.endswith('.xls'):
                         df = pd.read_excel(file_path, engine='xlrd')
                     else:
                         df = pd.read_excel(file_path, engine='openpyxl')
                     combined_df = pd.concat([combined_df, df], ignore_index=True)
-
             return combined_df
         except Exception as e:
             print(f"엑셀 파일 읽기 오류: {e}")
             raise
 
     def generate_embeddings(self, texts):
-        """Generate embeddings for a list of texts."""
         return self.model.encode(texts)
 
     def create_faiss_index(self, embeddings):
-        """Create a FAISS index from embeddings."""
         index = faiss.IndexFlatL2(embeddings.shape[1])
         index.add(embeddings)
         return index
 
-    def find_similar_question(self, question):
+    def show_popup_non_blocking(self, message):
+        """ Shows a non-blocking popup using threading. """
+        def popup(message):
+            message_box_styles = 0x00000040 | 0x00000000 | 0x00040000 | 0x00001000
+            ctypes.windll.user32.MessageBoxW(0, message, "중요한 문의 알림", message_box_styles)
+
+        threading.Thread(target=popup, args=(message,), daemon=True).start()
+
+    def find_similar_question_with_product(self, question, product_name):
         try:
             question_embedding = self.model.encode([question])
-            distances, indices = self.index.search(question_embedding, 1)
-            most_similar_idx = indices[0][0]
-            most_similar_question = self.df.iloc[most_similar_idx]['문의내용']
-            similarity_score = 100 - distances[0][0]  # Adjust the similarity score for easier interpretation
-            print(f"가장 유사한 질문: {most_similar_question} (유사도 점수: {similarity_score})")
-            similar_question_data = self.df.iloc[most_similar_idx]
-            print(similar_question_data)
-            return similar_question_data, similarity_score
+            distances, indices = self.index.search(question_embedding, 10)
+            similar_questions = []
+
+            for idx in indices[0]:
+                if 0 <= idx < len(self.df):
+                    entry = self.df.iloc[idx]
+                    is_product_name_match = entry['상품명'] == product_name
+                    is_high_similarity = (100 - distances[0][indices[0].tolist().index(idx)]) > 90
+                    if is_product_name_match or is_high_similarity:
+                        similar_questions.append((entry, 100 - distances[0][indices[0].tolist().index(idx)]))
+            return similar_questions if similar_questions else []
         except Exception as e:
             print(f"유사한 질문 찾기 오류: {e}")
-            return None, 0
+            return []
 
-    def generate_answer(self, question, ocr_summaries, product_name, comment_time=None, current_time=None):
+    def check_stock(self, master_code):
+        if not master_code:
+            return "정보를 확인할 수 없습니다."
+
+        url = "https://api.e3pl.kr/ai/"
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+        }
+        payload = {
+            "m": "stock",
+            "c": master_code,
+            "s": "kazmi"
+        }
+
         try:
-            if self.check_if_important_question(question):
-                self.show_popup_and_wait(question)
+            response = requests.post(url, headers=headers, json=payload)
+            response.raise_for_status()
 
-            image_summary = ocr_summaries if ocr_summaries else "해당 제품에 대한 이미지에서 정보를 추출하지 않았습니다."
+            if 'application/json' in response.headers.get('Content-Type', ''):
+                stock_data = response.json()
 
-            similar_question_data, score = self.find_similar_question(question)
-            if similar_question_data is None:
-                similar_question_prompt = "죄송합니다. 데이터베이스에서 유사한 질문을 찾을 수 없습니다."
-                similar_question_answer = None
-            else:
-                similar_question_answer = similar_question_data['답변내용']
-                if 100 >= score >= 90:
-                    similar_question_prompt = f"다음 모범 답안을 참고해 주세요 (유사도 점수: {score}):\n\nQ: {similar_question_data['문의내용']}\nA: {similar_question_answer}\n\n"
-                else:
-                    similar_question_prompt = f"다음 유사 질문과 그 답변을 참고해 주세요 (유사도 점수: {score}):\n\nQ: {similar_question_data['문의내용']}\nA: {similar_question_answer}\n\n"
+                if stock_data.get('success'):
+                    return "상품이 재고가 있습니다." if stock_data['result'][0]['ea'] > 0 else "현재 상품의 재고가 없습니다."
+            return "Response not in JSON format."
 
+        except requests.exceptions.HTTPError as http_err:
+            print(f"HTTP error occurred: {http_err}")
+        except requests.exceptions.RequestException as req_err:
+            print(f"Request exception occurred: {req_err}")
+        except ValueError as json_err:
+            print(f"JSON parsing error: {json_err}")
+            print(f"Response content for debugging: {response.content}")
+
+        return "정보를 확인할 수 없습니다."
+
+    def generate_answer(self, question, summaries, product_info, inquiry_data, product_name, comment_time=None):
+        current_time = time.strftime("%Y-%m-%d %H:%M:%S")
+
+        try:
             category_info = self.classify_question(question)
             categories = self.extract_category_from_classification(category_info)
+
+            if self.check_if_important_question(question) or '기타 질문' in categories or '사용법/호환성' in categories:
+                self.show_popup_non_blocking(question)
+
+            if not isinstance(product_info, dict):
+                return "죄송합니다, 제품 정보를 처리할 수 없습니다."
+
+            if not isinstance(summaries, list) or not all(isinstance(summary, dict) and 'summary' in summary for summary in summaries):
+                return "죄송합니다, 화면에 표시 가능한 데이터를 찾을 수 없습니다."
+
+            master_code = inquiry_data.get('MasterCode', '')
+            stock_status = self.check_stock(master_code)
+            print(stock_status)
+
+            # Ensure each summary entry is a string for joining
+            image_summary = " ".join([str(summary.get('summary', '')) for summary in summaries])
+
+            similar_questions = self.find_similar_question_with_product(question, product_name)
+
+            similar_question_prompt = ""
+            if similar_questions:
+                for similar_question_data, score in similar_questions:
+                    similar_question_answer = similar_question_data.get('답변내용', "기존 데이터베이스에 답변이 없습니다.")
+                    similar_question_prompt += f"\n\nQ: {similar_question_data.get('문의내용', '')}\nA: {similar_question_answer}\n\n"
+            else:
+                similar_question_prompt = "죄송합니다. 데이터베이스에서 유사한 질문을 찾을 수 없습니다."
+
             specific_prompt = self.get_specific_prompt(categories)
 
-            print("카테고리들:", categories)
-            print("적용된 specific_prompt:", specific_prompt)
+            product_details = f"상품명: {product_name}\n" + "\n".join([f"{key}: {value}" for key, value in product_info.items() if key != 'ProductName'])
+            response_data_details = "\n".join([f"{key}: {value}" for key, value in inquiry_data.items()])
 
             answer_prompt = f"""
-            제공된 제품 정보 및 유사 질문 답변을 바탕으로 다음 문의에 답변해 주세요. 제품명과 고객질문을 언급하지 말아주세요.
+            제공된 제품 정보, 유사 질문 답변 및 재고 정보를 바탕으로 다음 문의에 답변해 주세요. 제품명과 고객질문을 언급하지 말아주세요.
             제품명: {product_name}
             고객 질문: {question}
-            """
-
-            # Append times if provided
-            if comment_time and current_time:
-                answer_prompt += f"""
-                질문 시간: {comment_time} 
-                현재 시간: {current_time}
-                """
-
-            answer_prompt += f"""
+            제품 정보: {product_details}
+            이미지 정보: {image_summary}
+            추가 문의 정보: {response_data_details}
+            재고 상황: {stock_status}
             {similar_question_prompt}
-            제품 정보: {image_summary}
             {specific_prompt}
             """
+
+            if comment_time:
+                answer_prompt += f"\n\n질문 시간: {comment_time} \n현재 시간: {current_time}"
 
             chat_completion = self.client.chat.completions.create(
                 model="gpt-4o",
@@ -190,24 +251,51 @@ class AnswerGenerator:
             )
             answer = chat_completion.choices[0].message.content
             return answer
-        
+
         except Exception as e:
             print(f"답변 생성 오류: {e}")
             return "죄송합니다, 답변을 생성할 수 없습니다."
+        
+    def revise_answer(self, user_input, original_answer):
+        try:
+            revision_prompt = f"""
+            수정 전 답변: {original_answer}
+            사용자 입력: {user_input}
+            사용자의 피드백을 반영하여 답변을 다시 생성해주세요.
+            만약 작은 따움표('')사이에 내용을 입력한 경우 해당 내용 그대로 답변으로 하십시오.
+            """
+
+            chat_completion = self.client.chat.completions.create(
+                model="gpt-4o",
+                temperature=0.7,
+                messages=[
+                    {"role": "system", "content": self.system_prompt},
+                    {"role": "user", "content": revision_prompt}
+                ]
+            )
+            revised_answer = chat_completion.choices[0].message.content
+            return revised_answer
+        except Exception as e:
+            print(f"답변 수정 오류: {e}")
+            return original_answer
 
     def check_if_important_question(self, question):
         try:
             check_prompt = f"""
             다음 고객 문의가 아래 카테고리와 관련이 있는지 판단해 주세요.
-            - 택배관련 문의 
-            - 방문수령 문의
-            - 송장관련 문의
+            - 택배 관련 문의 
+            - 방문 수령 문의
+            - 송장 관련 문의
+            - 묶음 배송 관련 문의
             - 주소 변경
             - 고객 이름 변경
             - 받는 주소 변경
             - 주문 취소
             - 입고 관련
             - 재입고 관련
+            - 출시 예정
+            - 상품 간의 차이
+            - 사용법/호환성
 
             고객 문의: {question}
 
@@ -229,47 +317,26 @@ class AnswerGenerator:
             print(f"중요한 질문 판별 오류: {e}")
             return False
 
-    def show_popup_and_wait(self, question):
-        message_box_styles = 0x00000040 | 0x00000000 | 0x00040000 | 0x00001000
-        ctypes.windll.user32.MessageBoxW(0, f"중요한 고객 문의가 들어왔습니다:\n\n{question}", "중요한 문의 알림", message_box_styles)
-
-    def revise_answer(self, user_input, original_answer):
-        try:
-            revision_prompt = f"""
-            수정 전 답변: {original_answer}
-            사용자 입력: {user_input}
-            사용자의 피드백을 반영하여 답변을 다시 생성해주세요.
-            """
-
-            chat_completion = self.client.chat.completions.create(
-                model="gpt-4o",
-                temperature=0.7,
-                messages=[
-                    {"role": "system", "content": self.system_prompt},
-                    {"role": "user", "content": revision_prompt}
-                ]
-            )
-            revised_answer = chat_completion.choices[0].message.content
-            return revised_answer
-        except Exception as e:
-            print(f"답변 수정 오류: {e}")
-            return original_answer
-
     def classify_question(self, question):
         try:
             classification_prompt = f"""
             다음 고객 문의를 관련된 모든 카테고리로 분류해 주세요. 여러 카테고리가 관련된 경우 모두 표시해 주세요.
             카테고리 목록: [제품 리뷰, 재고/입고/배송, AS (수리, 반품, 교환), 사용법/호환성, 제품 문의, 할인 문의, 기술 지원, 기타 질문]
-            다음 고객 문의가 아래 상황 중 하나에 해당한다면 기타 질문으로 분류합니다.
-            - 택배관련 문의 
-            - 방문수령 문의
-            - 송장관련 문의
+            소비자 문의가 아래 상황 중 하나에 해당하면 기타 질문입니다.
+            - 택배 관련 문의 
+            - 방문 수령 문의
+            - 송장 관련 문의
+            - 묶음 배송 관련 문의
             - 주소 변경
             - 고객 이름 변경
             - 받는 주소 변경
             - 주문 취소
             - 입고 관련
             - 재입고 관련
+            - 출시 예정
+            - 상품 간의 차이
+            - 사용법/호환성
+
             고객 문의: {question}
             """
             chat_completion = self.client.chat.completions.create(
@@ -288,7 +355,7 @@ class AnswerGenerator:
             return "기타 질문"
 
     def extract_category_from_classification(self, category_info):
-        categories = ["제품 리뷰", "재고/입고/배송", "AS (수리, 반품, 교환)", 
+        categories = ["제품 리뷰", "재고/입고/배송", "AS (수리, 반품, 교환)",
                       "사용법/호환성", "제품 문의", "할인 문의", "기술 지원", "기타 질문"]
         detected_categories = [category for category in categories if category in category_info]
         return detected_categories
@@ -297,12 +364,9 @@ class AnswerGenerator:
         category_prompts = {
             "제품 리뷰": """
             고객님께서 작성하신 제품 리뷰를 토대로 가능한 친절하고 공손하게 응답해 주세요. 고객님의 피드백을 반영하여 개선될 점이 있다면 공감하며 답변해 주세요.
-            제품에관해 전혀 모름으로 제품에 대한 상세 설명을 넣지 않습니다.
-            임의로 제품의 사이즈나 특징들을 얘기하지 않습니다.
             """,
             "재고/입고/배송": """
             고객님께서 재고, 입고, 또는 배송에 관한 문의를 주셨습니다. 정확한 재고 상태, 입고 예정일, 배송 가능 여부 및 소요일 등에 대해 상세히 답변해 주세요.
-            주문가능하거나 주문된 제품의 재고는 항상 있습니다.
             단종은 아니지만 재입고 날짜가 확정되지 않아 당분간은 구매가 어렵습니다.
             오후1시 이전 주문건은 당일출고가 됩니다.
             오후1시 이후 주문건은 익일출고가 됩니다.
@@ -330,12 +394,11 @@ class AnswerGenerator:
             고객님께서 제품의 사용법 또는 다른 제품과의 호환성에 대해 문의를 주셨습니다. 제품의 사용 방법 및 호환 가능 여부를 상세하게 안내해 주세요.
             """,
             "제품 문의": """
-            정확한 계산방법과 근거를 합니다.
-            정보가 정확히 기재가 돼 있지 않으면 근거를 찾아 계산하거나 산출하세요. 계산이나 산출이 안된다면 톡톡문의로 넘기세요.
-            선물세트 라는 단어가 제품명에 포함돼 있으면 매장안내나 as안내를 하지 않습니다.
+            정보가 없는 사이즈나 용량 등의 문의에 대한 답변은 계산해서 해주지 말고 본인이 직접 확인하도록 유도하도록 합니다.
+            "각 제품의 형상과 두께, 재는 방법에 따라 차이가 큼으로 정확한 안내를 해드리기 어렵습니다. 본사 직영매장이나 가까운 취급점에 방문하셔서 직접 확인을 부탁드립니다."라고 답변한다.
+            선물세트라는 단어가 제품명에 포함돼 있으면 매장 안내나 AS 안내를 하지 않습니다.
             제품에 관해서는 최대한 긍정적으로 좋게 설명합니다.
-            계산을 한다면 모든 수치에 대해서는 본 제품과 작은 오차가 있을 수 있습니다. 라는 설명을 넣습니다.
-            실제 제품의 크기는 최대 ±5 정도의 오차가 발생할 수 있습니다. 이는 제조 공정상의 특성으로 인한 것입니다.
+            실제 제품의 크기는 오차가 발생할 수 있습니다. 이는 제조 공정상의 특성으로 인한 것입니다.
             단종은 아니지만 재입고 날짜가 확정되지 않아 당분간은 구매가 어렵습니다.
 
             식기세척기 사용 가능 제품 이름과 모델명:
@@ -376,11 +439,10 @@ class AnswerGenerator:
             "기타 질문": """
             고객님께서 기타 문의를 주셨습니다. 질문의 의도를 다시 한번 파악하고 질문과 상황에 맞는 답변을 생성해주세요.
             모른다거나 확인이 필요하다 라는 답변을 하지 않습니다.
-            추가정보를 요구하지 않습니다.
-            주문가능하거나 주문된 제품의 재고는 항상 있습니다.
+            추가 정보를 요구하지 않습니다.
             단종은 아니지만 재입고 날짜가 확정되지 않아 당분간은 구매가 어렵습니다.
-            오후1시 이전 주문건은 당일출고가 됩니다.
-            오후1시 이후 주문건은 익일출고가 됩니다.
+            오후1시 이전 주문건은 당일 출고가 됩니다.
+            오후1시 이후 주문건은 익일 출고가 됩니다.
             """
         }
         prompt = "\n".join([category_prompts[cat] for cat in categories])
